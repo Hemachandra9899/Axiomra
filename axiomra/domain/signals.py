@@ -10,7 +10,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from axiomra.domain.common import as_utc
 
 Direction = Literal["LONG", "SHORT", "NEUTRAL"]
 
@@ -80,6 +82,8 @@ class TradeCandidate(BaseModel):
     symbol: str
     timestamp: datetime
 
+    decision_id: str | None = None
+
     raw_score: float = Field(ge=-1.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
     effective_score: float = Field(ge=-1.0, le=1.0)
@@ -94,6 +98,11 @@ class TradeCandidate(BaseModel):
     regime: Regime
     data_version: str
     model_versions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _utc_ts(cls, value: datetime) -> datetime:
+        return as_utc(value)
 
 
 class SignalClassification(BaseModel):

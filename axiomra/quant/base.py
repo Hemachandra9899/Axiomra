@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from axiomra.domain.market import MarketSnapshot
 from axiomra.domain.signals import QuantPrediction
+from axiomra.versions import MODEL_VERSION_ENSEMBLE
 
 
 class QuantModel(ABC):
@@ -72,6 +73,6 @@ class QuantEnsemble:
             if any(p.expected_return is not None for p in predictions)
             else None,
             model_name="quant_ensemble",
-            model_version="ensemble-v1",
+            model_version=MODEL_VERSION_ENSEMBLE,
             reasons=[f"{p.model_name}:{p.score:+.2f}" for p in predictions],
         )

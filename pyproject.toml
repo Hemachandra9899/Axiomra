@@ -60,3 +60,20 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 strict = false
+
+[[tool.mypy.overrides]]
+module = [
+    "lightgbm",
+    "lightgbm.*",
+    "pandas",
+    "pandas.*",
+    "yfinance",
+    "yfinance.*",
+    "asyncpg",
+    "asyncpg.*",
+    "sqlalchemy",
+    "sqlalchemy.*",
+    "fastapi",
+    "fastapi.*",
+]
+ignore_missing_imports = true

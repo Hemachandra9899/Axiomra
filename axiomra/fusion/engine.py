@@ -76,6 +76,7 @@ class FusionConfig:
 
     default_base_weight: float = 0.10
     default_reliability: float = 0.50
+    expected_signal_count: int = 4
     regime: str = Regime.UNKNOWN
     historical_reliability: dict[str, float] = field(default_factory=dict)
     base_weights: dict[str, float] = field(default_factory=lambda: dict(BASE_WEIGHTS))
@@ -126,13 +127,24 @@ def fuse_signals(
 
     raw_score = sum(sig.score * w for sig, w in weighted_scores) / total_weight
 
+    # Weighted confidence: a strong source with low confidence must not produce
+    # a confident fused signal just because nothing disagrees with it.
+    weighted_confidence = (
+        sum(sig.confidence * w for sig, w in weighted_scores) / total_weight
+    )
+
     variance = (
         sum(w * (sig.score - raw_score) ** 2 for sig, w in weighted_scores)
         / total_weight
     )
     disagreement = min(1.0, sqrt(variance))
+    agreement_factor = 1.0 - disagreement
 
-    confidence = max(0.0, 1.0 - disagreement)
+    # Coverage: a single weak source should not carry the same confidence as a
+    # full panel of independent sources.
+    coverage = min(1.0, len(weighted_scores) / max(cfg.expected_signal_count, 1))
+
+    confidence = max(0.0, weighted_confidence * agreement_factor * coverage)
     effective_score = raw_score * confidence
 
     sources = [

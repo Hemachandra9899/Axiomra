@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-FEATURE_VERSION = "f-v1"
+from axiomra.versions import FEATURE_VERSION
 
 
 def _safe(pct: pd.Series) -> pd.Series:

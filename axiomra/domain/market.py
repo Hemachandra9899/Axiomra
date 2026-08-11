@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from axiomra.domain.common import as_utc
 from axiomra.domain.signals import Regime
 
 
@@ -35,6 +36,11 @@ class Bar(OHLCV):
 
     symbol: str
     timestamp: datetime
+
+    @field_validator("timestamp")
+    @classmethod
+    def _utc_ts(cls, value: datetime) -> datetime:
+        return as_utc(value)
 
 
 class FeatureSnapshot(BaseModel):
@@ -67,6 +73,11 @@ class MarketSnapshot(BaseModel):
 
     data_version: str
     feature_version: str = ""
+
+    @field_validator("timestamp")
+    @classmethod
+    def _utc_ts(cls, value: datetime) -> datetime:
+        return as_utc(value)
 
     @classmethod
     def at_utc_now(

@@ -38,7 +38,7 @@ class OrderRequest(BaseModel):
     symbol: str
     side: OrderSide
     quantity: int = Field(gt=0)
-    order_type: OrderType = "MARKET"
+    order_type: OrderType = OrderType.MARKET
     limit_price: float | None = Field(default=None, gt=0)
     decision_id: str | None = None
     created_at: datetime | None = None

@@ -8,16 +8,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axiomra.domain.portfolio import RiskCheck
 from axiomra.risk.context import RiskContext
 from axiomra.risk.rules import RiskRule, compile_rules
+from axiomra.versions import RISK_POLICY_VERSION
 
 
 class RiskDecision(BaseModel):
     approved: bool
-    checks: list[RiskCheck] = []
+    checks: list[RiskCheck] = Field(default_factory=list)
     policy_version: str = ""
 
     @property
@@ -38,7 +39,11 @@ class RiskPolicy:
     rules: list[RiskRule] = field(default_factory=list)
 
     @classmethod
-    def defaults(cls, name: str = "axiomra-default", version: str = "risk-v1") -> RiskPolicy:
+    def defaults(
+        cls,
+        name: str = "axiomra-default",
+        version: str = RISK_POLICY_VERSION,
+    ) -> RiskPolicy:
         return cls(name=name, version=version, rules=compile_rules())
 
 

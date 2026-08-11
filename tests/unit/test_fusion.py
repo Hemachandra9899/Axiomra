@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from axiomra.domain.signals import EvidenceSignal, Regime
 from axiomra.fusion.engine import (
     BASE_WEIGHTS,
@@ -73,6 +75,51 @@ def test_signal_fusion_engine_wrappers():
         [EvidenceSignal(source="quant", score=0.5, confidence=0.8)]
     )
     assert result.raw_score == 0.5
+
+
+def test_low_confidence_single_signal_stays_low():
+    """One weak source must not produce high confidence just because there is
+    nothing to disagree with."""
+    result = fuse_signals(
+        [EvidenceSignal(source="quant", score=0.8, confidence=0.10)]
+    )
+    assert result.disagreement == pytest.approx(0.0, abs=1e-9)
+    assert result.confidence <= 0.10
+    assert result.effective_score < 0.1
+
+
+def test_low_confidence_agreeing_signals_stay_low():
+    result = fuse_signals(
+        [
+            EvidenceSignal(source="quant", score=0.8, confidence=0.10),
+            EvidenceSignal(source="technical", score=0.7, confidence=0.10),
+            EvidenceSignal(source="fundamental", score=0.7, confidence=0.10),
+        ]
+    )
+    assert result.confidence <= 0.10 * 1.0 * (3 / 4) + 1e-9
+
+
+def test_high_confidence_agreeing_signals_are_high():
+    result = fuse_signals(
+        [
+            EvidenceSignal(source="quant", score=0.7, confidence=0.9),
+            EvidenceSignal(source="technical", score=0.7, confidence=0.9),
+            EvidenceSignal(source="fundamental", score=0.7, confidence=0.9),
+            EvidenceSignal(source="news", score=0.7, confidence=0.9),
+        ]
+    )
+    assert result.confidence > 0.6
+    assert result.disagreement < 0.1
+
+
+def test_coverage_penalizes_missing_panel():
+    """With a full panel expected, a single strong source is not trusted."""
+    cfg = FusionConfig(expected_signal_count=5)
+    result = fuse_signals(
+        [EvidenceSignal(source="quant", score=0.8, confidence=0.9)],
+        cfg,
+    )
+    assert result.confidence == pytest.approx(0.9 * (1 / 5))
 
 
 def test_base_weights_are_positive():

@@ -8,6 +8,7 @@ from __future__ import annotations
 from axiomra.domain.market import MarketSnapshot
 from axiomra.domain.signals import QuantPrediction
 from axiomra.quant.base import QuantModel
+from axiomra.versions import MODEL_VERSION_MOMENTUM
 
 
 class MomentumBaseline(QuantModel):
@@ -18,7 +19,7 @@ class MomentumBaseline(QuantModel):
     """
 
     name = "momentum"
-    version = "v1"
+    version = MODEL_VERSION_MOMENTUM
 
     async def predict(self, snapshot: MarketSnapshot) -> QuantPrediction:
         f = snapshot.features

@@ -15,10 +15,11 @@ from pydantic import BaseModel
 from axiomra.data.repository import DataRepository
 from axiomra.decision import DecisionEngine, DecisionResult
 from axiomra.domain.market import MarketSnapshot
-from axiomra.domain.orders import ExecutionResult, OrderRequest, OrderSide
+from axiomra.domain.orders import ExecutionResult
 from axiomra.domain.portfolio import PortfolioProposal
 from axiomra.execution.base import ExecutionEngine
 from axiomra.portfolio.optimizer import PortfolioOptimizer
+from axiomra.portfolio.planner import plan_order
 from axiomra.risk.context import RiskContext
 from axiomra.risk.engine import RiskDecision, RiskEngine
 
@@ -127,20 +128,24 @@ class AxiomraPipeline:
             )
             return outcome
 
-        order = OrderRequest(
+        # The order comes from the current->target delta, never the action
+        # label. A REDUCE on a zero position yields no order; a LONG whose
+        # target is already reached yields no order.
+        order = plan_order(
             symbol=snapshot.symbol,
-            side=OrderSide.BUY,
-            quantity=proposal.position_size.quantity if proposal.position_size else 0,
-            order_type="MARKET",
+            action=decision.action,
+            current_quantity=proposal.current_quantity,
+            target_quantity=proposal.target_quantity,
+            decision_id=getattr(decision.candidate, "decision_id", None),
         )
-        if order.quantity <= 0:
+        if order is None:
             outcome = PipelineOutcome(
                 status="NO_TRADE",
                 symbol=snapshot.symbol,
                 decision=decision,
                 proposal=proposal,
                 risk=risk,
-                reasons=["zero order quantity"],
+                reasons=["current position already at target"],
             )
             await self.repository.save_decision(
                 candidate=decision.candidate,

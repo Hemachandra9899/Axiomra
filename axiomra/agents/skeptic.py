@@ -44,9 +44,12 @@ class SkepticReviewAgent(SkepticAgent):
         objections = out.reasons or []
         invalidations = out.risks or []
 
-        severity = min(1.0, max(0.0, out.extra.get("severity", 0.5)))
-        if isinstance(severity, (int, float)) is False:
+        severity_raw = out.extra.get("severity", 0.5)
+        if isinstance(severity_raw, (int, float)):
+            severity = float(severity_raw)
+        else:
             severity = 0.5
+        severity = min(1.0, max(0.0, severity))
 
         return SkepticReview(
             severity=float(severity),

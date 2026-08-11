@@ -28,9 +28,8 @@ class Holding(BaseModel):
     quantity: int = Field(ge=0)
     avg_price: float = Field(gt=0)
     as_of: datetime
-    status: PositionStatus = "OPEN"
+    status: PositionStatus = PositionStatus.OPEN
 
-    @property
     def market_value(self, last_price: float) -> float:
         return self.quantity * last_price
 
@@ -48,7 +47,12 @@ class PositionSize(BaseModel):
 
 
 class PortfolioProposal(BaseModel):
-    """Output of the portfolio engine. Input to Axiomra Guard."""
+    """Output of the portfolio engine. Input to Axiomra Guard.
+
+    The proposal expresses a *target position* (target_quantity) relative to
+    the current position (current_quantity). The order is derived from the
+    delta by the planner, never from the action label alone.
+    """
 
     symbol: str
     portfolio_value: float = Field(gt=0)
@@ -56,6 +60,9 @@ class PortfolioProposal(BaseModel):
 
     position_size: PositionSize | None = None
     target_weight: float = Field(ge=0.0, le=1.0)
+
+    current_quantity: int = Field(default=0, ge=0)
+    target_quantity: int = Field(default=0, ge=0)
 
     current_position_pct: float = Field(ge=0.0)
     projected_position_pct: float = Field(ge=0.0)
@@ -68,6 +75,11 @@ class PortfolioProposal(BaseModel):
     @property
     def has_order(self) -> bool:
         return self.order is not None
+
+    @property
+    def delta_quantity(self) -> int:
+        """Signed difference the execution layer must trade."""
+        return self.target_quantity - self.current_quantity
 
 
 class RiskCheck(BaseModel):

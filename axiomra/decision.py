@@ -7,6 +7,7 @@ execution happen afterward. This module never touches a broker.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -22,8 +23,11 @@ from axiomra.domain.signals import (
 )
 from axiomra.fusion.engine import FusionResult, SignalFusionEngine
 from axiomra.quant.base import QuantModel
-
-NO_TRADE_THRESHOLD = 0.30
+from axiomra.versions import (
+    DECISION_ENGINE_VERSION,
+    FUSION_VERSION,
+    NO_TRADE_THRESHOLD,
+)
 
 
 class DecisionResult(BaseModel):
@@ -63,6 +67,13 @@ class DecisionEngine:
         self.fusion = fusion_engine
         self.config = config or DecisionConfig()
 
+        # Coverage is measured against the full panel of independent sources:
+        # 1 quant model + every configured research agent. If agents are not
+        # configured yet, a lone quant signal still counts as full coverage.
+        self.fusion.config.expected_signal_count = max(
+            1, 1 + len(orchestrator.agents)
+        )
+
     async def analyze(self, snapshot: MarketSnapshot) -> DecisionResult:
         quant: QuantPrediction = await self.quant_model.predict(snapshot)
 
@@ -92,6 +103,7 @@ class DecisionEngine:
         candidate = TradeCandidate(
             symbol=snapshot.symbol,
             timestamp=snapshot.timestamp,
+            decision_id=str(uuid4()),
             raw_score=raw_score,
             confidence=confidence,
             effective_score=effective_score,
@@ -103,7 +115,8 @@ class DecisionEngine:
             data_version=snapshot.data_version,
             model_versions={
                 **self.quant_model.model_versions(),
-                "fusion_version": "fusion-v1",
+                "fusion_version": FUSION_VERSION,
+                "decision_version": DECISION_ENGINE_VERSION,
             },
         )
 

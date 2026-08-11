@@ -10,11 +10,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from axiomra.domain.common import as_utc
 
 
 class JournalEntry(BaseModel):
     """One immutable decision record."""
+
+    model_config = ConfigDict(frozen=True)
 
     decision_id: str
     symbol: str
@@ -36,6 +40,11 @@ class JournalEntry(BaseModel):
 
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     outcome_return_pct: float | None = None
+
+    @field_validator("timestamp")
+    @classmethod
+    def _utc_ts(cls, value: datetime) -> datetime:
+        return as_utc(value)
 
 
 class MemoryJournal:

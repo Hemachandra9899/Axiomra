@@ -25,7 +25,7 @@ class TechnicalAgent(ResearchAgent):
         self._reasoner = reasoner
 
     async def analyze(self, snapshot: MarketSnapshot) -> EvidenceSignal:
-        context = {
+        context: dict[str, object] = {
             "features": {
                 k: v
                 for k, v in snapshot.features.items()

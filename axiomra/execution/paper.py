@@ -10,7 +10,7 @@ import random
 import uuid
 from dataclasses import dataclass
 
-from axiomra.domain.orders import ExecutionResult, OrderRequest
+from axiomra.domain.orders import ExecutionResult, OrderRequest, OrderSide, OrderStatus
 from axiomra.execution.base import ExecutionEngine
 
 
@@ -44,7 +44,7 @@ class PaperExecutionEngine(ExecutionEngine):
         if cfg.reject_probability > 0 and self.rng.random() < cfg.reject_probability:
             return ExecutionResult(
                 order_id=order_id,
-                status="REJECTED",
+                status=OrderStatus.REJECTED,
                 message="simulated rejection",
             )
 
@@ -55,13 +55,17 @@ class PaperExecutionEngine(ExecutionEngine):
             price = 100.0  # placeholder; use MarketDataProvider for real runs
 
         slippage = price * cfg.slippage_bps / 10_000
-        fill_price = max(0.01, price - slippage) if order.side == "BUY" else max(0.01, price + slippage)
+        fill_price = (
+            max(0.01, price - slippage)
+            if order.side == OrderSide.BUY
+            else max(0.01, price + slippage)
+        )
 
         filled = order.quantity
-        status = "FILLED"
+        status = OrderStatus.FILLED
         if cfg.partial_fill_probability > 0 and self.rng.random() < cfg.partial_fill_probability:
             filled = int(order.quantity * cfg.partial_fill_ratio)
-            status = "PARTIALLY_FILLED"
+            status = OrderStatus.PARTIALLY_FILLED
 
         return ExecutionResult(
             order_id=order_id,

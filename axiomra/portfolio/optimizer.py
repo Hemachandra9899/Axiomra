@@ -5,14 +5,21 @@ Deterministic rules, no LLM in the loop:
     max individual position
     max sector exposure
     max correlated cluster
-    target cash buffer / gross exposure
+
+A proposal expresses a *target position*. The execution planner derives the
+order from the delta between current and target, so a REDUCE can never
+become a BUY. For V1 long-only, REDUCE means "target zero (exit)".
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from axiomra.domain.portfolio import PortfolioProposal, PositionSize
+from axiomra.domain.portfolio import (
+    PortfolioProposal,
+    PositionSize,
+    ProposalDirection,
+)
 from axiomra.domain.signals import TradeCandidate
 from axiomra.portfolio.sizing import (
     PositionSizeRequest,
@@ -40,11 +47,15 @@ class PortfolioState:
     """Existing book used to compute concentration deltas."""
 
     holdings: dict[str, float] = field(default_factory=dict)
+    quantities: dict[str, int] = field(default_factory=dict)
     sector_exposure: dict[str, float] = field(default_factory=dict)
+
+    def quantity(self, symbol: str) -> int:
+        return self.quantities.get(symbol, 0)
 
 
 class PortfolioOptimizer:
-    """Converts ranked candidates into sized proposals."""
+    """Converts ranked candidates into target-position proposals."""
 
     def __init__(
         self,
@@ -61,14 +72,28 @@ class PortfolioOptimizer:
         entry_price: float,
         atr: float,
     ) -> PortfolioProposal:
-        """Build a size proposal for one candidate.
+        """Build a target-position proposal for one candidate.
 
-        Returns an empty (no-order) proposal for NO_TRADE candidates.
+        - LONG   -> target = risk-based size (bounded by position cap).
+                    If the current position already covers the target, the
+                    delta is <= 0 and the planner emits no order.
+        - REDUCE -> target = 0 (exit). Zero position yields no order.
         """
+        current_quantity = self.state.quantity(candidate.symbol)
+        current_pct = self.state.holdings.get(candidate.symbol, 0.0)
+
         if candidate.direction != "LONG":
-            return self._no_order(
-                candidate, portfolio_value, direction="REDUCE",
-                reasons=["non-long candidate"],
+            return PortfolioProposal(
+                symbol=candidate.symbol,
+                portfolio_value=portfolio_value,
+                direction=ProposalDirection.REDUCE,
+                target_weight=0.0,
+                current_quantity=current_quantity,
+                target_quantity=0,
+                current_position_pct=current_pct,
+                projected_position_pct=0.0,
+                projected_sector_pct=0.0,
+                reasons=["bearish signal: target position is zero (exit)"],
             )
 
         req = PositionSizeRequest(
@@ -84,10 +109,7 @@ class PortfolioOptimizer:
         )
 
         if capped_qty <= 0:
-            return self._no_order(
-                candidate, portfolio_value, direction="LONG",
-                reasons=["size rounded to zero"],
-            )
+            return self._empty_long(candidate, portfolio_value, current_quantity, current_pct)
 
         notional = capped_qty * entry_price
         target_weight = notional / portfolio_value
@@ -100,7 +122,7 @@ class PortfolioOptimizer:
         return PortfolioProposal(
             symbol=candidate.symbol,
             portfolio_value=portfolio_value,
-            direction="LONG",
+            direction=ProposalDirection.LONG,
             position_size=PositionSize(
                 symbol=candidate.symbol,
                 quantity=capped_qty,
@@ -111,30 +133,34 @@ class PortfolioOptimizer:
                 reason="risk-based sizing with position cap",
             ),
             target_weight=target_weight,
-            current_position_pct=self.state.holdings.get(candidate.symbol, 0.0),
+            current_quantity=current_quantity,
+            target_quantity=capped_qty,
+            current_position_pct=current_pct,
             projected_position_pct=target_weight,
             projected_sector_pct=projected_sector,
             reasons=[
-                f"quantity={capped_qty}",
+                f"current={current_quantity} target={capped_qty}",
                 f"target_weight={target_weight:.2%}",
                 f"stop={stop:.2f}",
             ],
         )
 
-    def _no_order(
+    def _empty_long(
         self,
         candidate: TradeCandidate,
         portfolio_value: float,
-        direction: str,
-        reasons: list[str],
+        current_quantity: int,
+        current_pct: float,
     ) -> PortfolioProposal:
         return PortfolioProposal(
             symbol=candidate.symbol,
             portfolio_value=portfolio_value,
-            direction=direction,
+            direction=ProposalDirection.LONG,
             target_weight=0.0,
-            current_position_pct=self.state.holdings.get(candidate.symbol, 0.0),
+            current_quantity=current_quantity,
+            target_quantity=0,
+            current_position_pct=current_pct,
             projected_position_pct=0.0,
             projected_sector_pct=0.0,
-            reasons=reasons,
+            reasons=["size rounded to zero"],
         )

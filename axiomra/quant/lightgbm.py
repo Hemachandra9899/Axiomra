@@ -9,6 +9,7 @@ from __future__ import annotations
 from axiomra.domain.market import MarketSnapshot
 from axiomra.domain.signals import QuantPrediction
 from axiomra.quant.base import QuantModel
+from axiomra.versions import MODEL_VERSION_LIGHTGBM
 
 try:  # pragma: no cover - exercised only when lightgbm is present
     import lightgbm as lgbm
@@ -36,7 +37,7 @@ class LightGBMQuantModel(QuantModel):
         model,
         features: list[str] | None = None,
         confidence: float = 0.75,
-        model_version: str = "lgbm-v1",
+        model_version: str = MODEL_VERSION_LIGHTGBM,
     ) -> None:
         if lgbm is None:
             raise ImportError(
