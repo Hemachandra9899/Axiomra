@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from axiomra.data.instruments import InstrumentMaster
 from axiomra.data.snapshot import DatasetSnapshot
 from axiomra.quant.trainer import build_training_frame
 
@@ -23,6 +24,7 @@ class WalkForwardSplitter:
     """Splits sorted dates into expanding-window (train, test) folds."""
 
     n_splits: int = 4
+
     min_train_days: int = 250
 
     def folds(
@@ -188,11 +190,13 @@ def evaluate_daily_predictions(
 
 
 def run_walk_forward(
+
     snapshot: DatasetSnapshot,
     horizon: int = 5,
     n_splits: int = 4,
     min_train_days: int = 250,
     estimator_factory: object | None = None,
+    instruments: InstrumentMaster | None = None,
 ) -> WalkForwardReport:
     """Walk-forward training and out-of-sample evaluation.
 
@@ -212,9 +216,10 @@ def run_walk_forward(
 
         estimator_factory = default_factory
 
-    frame = build_training_frame(snapshot, horizon=horizon)
+    frame = build_training_frame(snapshot, horizon=horizon, instruments=instruments)
     if frame.empty:
         raise ValueError("no training rows available")
+
 
     dates = sorted(frame["date"].unique())
     splitter = WalkForwardSplitter(n_splits=n_splits, min_train_days=min_train_days)

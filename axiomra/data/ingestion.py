@@ -200,16 +200,17 @@ class IngestionPipeline:
                 continue
 
             if instrument is None:
-                bars_by_symbol[symbol] = raw
+                adjusted, moved = adjust_splits(raw, [], adjustment_mode=adjustment_mode)
+                bars_by_symbol[symbol] = adjusted
                 continue
 
             actions = self.instruments.actions(instrument.instrument_id)
-            should_adjust_divs = (adjustment_mode == AdjustmentMode.TOTAL_RETURN)
-            adjusted, moved = adjust_splits(raw, actions, adjust_dividends=should_adjust_divs)
+            adjusted, moved = adjust_splits(raw, actions, adjustment_mode=adjustment_mode)
             bars_by_symbol[symbol] = adjusted
             all_actions.extend(actions)
             if moved:
                 adjusted_symbols.append(symbol)
+
 
         snapshot = create_snapshot(
             universe=universe,

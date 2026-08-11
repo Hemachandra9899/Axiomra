@@ -379,4 +379,125 @@ def test_symbol_rename_retains_index_membership():
     assert (frame["symbol"] == "OLD.NS").all()
 
 
+@pytest.mark.asyncio
+async def test_ingestion_pipeline_adjustment_modes():
+    """IngestionPipeline.ingest() MUST correctly pass adjustment_mode down to adjust_splits."""
+    from axiomra.data.ingestion import IngestionPipeline
+    from axiomra.data.providers.base import MarketDataProvider
+    from axiomra.data.snapshot import AdjustmentMode
+
+    bars = _sample_bars("AAA.NS", days=4, start_price=100.0)
+    split_action = CorporateAction(
+        instrument_id="inst-1",
+        action_type="SPLIT",
+        ex_date=datetime(2024, 1, 3, tzinfo=UTC),
+        ratio=2.0,
+    )
+
+    master = InstrumentMaster()
+    master.upsert(
+        Instrument(
+            instrument_id="inst-1",
+            symbol="AAA.NS",
+            active_from=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+    )
+    master.add_action(split_action)
+
+    class FixedProvider(MarketDataProvider):
+        async def bars(self, symbol, start, end, timeframe="1d"):
+            return list(bars)
+
+        async def latest_snapshot(self, symbol):
+            pass
+
+    pipeline = IngestionPipeline(provider=FixedProvider(), instruments=master)
+    uni = Universe(name="TEST", version="v1", as_of=datetime.now(UTC), members=["AAA.NS"])
+
+    # Test RAW mode through pipeline
+    res_raw = await pipeline.ingest(
+        universe=uni,
+        start=datetime(2024, 1, 1, tzinfo=UTC).date(),
+        end=datetime(2024, 1, 10, tzinfo=UTC).date(),
+        adjustment_mode=AdjustmentMode.RAW,
+    )
+    assert len(res_raw.adjusted_symbols) == 0
+
+    # Test SPLIT_ADJUSTED mode through pipeline
+    res_split = await pipeline.ingest(
+        universe=uni,
+        start=datetime(2024, 1, 1, tzinfo=UTC).date(),
+        end=datetime(2024, 1, 10, tzinfo=UTC).date(),
+        adjustment_mode=AdjustmentMode.SPLIT_ADJUSTED,
+    )
+    assert "AAA.NS" in res_split.adjusted_symbols
+
+
+def test_walkforward_symbol_rename_with_instruments():
+    """run_walk_forward MUST accept instruments and preserve observations across symbol renames."""
+    from axiomra.backtest.walkforward import run_walk_forward
+
+    master = InstrumentMaster()
+    master.upsert(
+        Instrument(
+            instrument_id="INST-999",
+            symbol="OLD.NS",
+            active_from=datetime(2020, 1, 1, tzinfo=UTC),
+            active_until=datetime(2022, 12, 31, tzinfo=UTC),
+        )
+    )
+    master.upsert(
+        Instrument(
+            instrument_id="INST-999",
+            symbol="NEW.NS",
+            active_from=datetime(2023, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    membership = IndexMembership(
+        instrument_id="INST-999",
+        symbol="NEW.NS",
+        index_name="NIFTY 50",
+        from_date=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+
+    # 300 days of bars for OLD.NS starting 2020-01-01
+    start = datetime(2020, 1, 1, tzinfo=UTC)
+    rng = [start + timedelta(days=i) for i in range(300)]
+    bars_old = [
+        Bar(
+            symbol="OLD.NS",
+            timestamp=dt,
+            open=100.0 + i * 0.1,
+            high=101.0 + i * 0.1,
+            low=99.0 + i * 0.1,
+            close=100.0 + i * 0.1,
+            volume=10000.0,
+        )
+        for i, dt in enumerate(rng)
+    ]
+
+    uni = Universe(name="NIFTY 50", version="v1", as_of=datetime.now(UTC), members=["OLD.NS"])
+    snap = create_snapshot(universe=uni, bars={"OLD.NS": bars_old}, data_version="d1", memberships=[membership])
+
+    def mean_estimator_factory(x_tr, y_tr):
+        class MeanEst:
+            def predict(self, x):
+                return [0.01] * len(x)
+        return MeanEst()
+
+    # Pass instruments=master into run_walk_forward
+    report = run_walk_forward(
+        snapshot=snap,
+        horizon=5,
+        n_splits=3,
+        min_train_days=30,
+        estimator_factory=mean_estimator_factory,
+        instruments=master,
+    )
+    assert report.n_folds > 0
+    assert report.folds[0].n_train >= 30
+
+
+
 

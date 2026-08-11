@@ -197,6 +197,7 @@ def train_lightgbm_model(
     feature_columns: list[str] | None = None,
     params: dict | None = None,
     model_version: str = "lgbm-v2",
+    instruments: InstrumentMaster | None = None,
 ) -> tuple[LightGBMQuantModel, TrainingReport]:
     """Train a cross-sectional LightGBM model on a dataset snapshot.
 
@@ -210,9 +211,10 @@ def train_lightgbm_model(
         )
 
     columns = feature_columns or DEFAULT_FEATURES
-    frame = build_training_frame(snapshot, horizon=horizon)
+    frame = build_training_frame(snapshot, horizon=horizon, instruments=instruments)
     if frame.empty:
         raise ValueError("training frame is empty: no usable bars after dropping NaN rows")
+
 
     feature_cols = [c for c in columns if c in frame.columns]
     if not feature_cols:
