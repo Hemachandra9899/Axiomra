@@ -17,7 +17,9 @@ import csv
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from axiomra.domain.common import as_utc
 
 UNIVERSE_SEED = "nifty50-v1"
 
@@ -110,10 +112,70 @@ def load_universe_csv(
         members = tuple(s for s, _ in rows)
     else:
         members = NIFTY_50
-
     return Universe(
+
         name=name,
         version=UNIVERSE_SEED,
         as_of=datetime.now(UTC),
         members=list(members),
     )
+
+
+class IndexMembership(BaseModel):
+
+    """Point-in-time membership of an instrument in a market index."""
+
+    instrument_id: str
+    symbol: str
+    index_name: str
+    from_date: datetime
+    until_date: datetime | None = None
+
+    @field_validator("from_date", "until_date")
+    @classmethod
+    def _utc(cls, value: datetime | None) -> datetime | None:
+        return as_utc(value) if value is not None else None
+
+    def is_active(self, as_of: datetime) -> bool:
+        utc_as_of = as_utc(as_of)
+        if utc_as_of < self.from_date:
+            return False
+        if self.until_date is not None and utc_as_of > self.until_date:
+            return False
+        return True
+
+
+class HistoricalUniverseRegistry:
+    """Registry managing historical index memberships for point-in-time universe retrieval."""
+
+    def __init__(self) -> None:
+        self._memberships: list[IndexMembership] = []
+
+    def add_membership(self, membership: IndexMembership) -> None:
+        self._memberships.append(membership)
+
+    def constituents_at(self, index_name: str, as_of: datetime) -> list[str]:
+        """Return symbols of all active index constituents as of a date."""
+        utc_as_of = as_utc(as_of)
+        active_symbols: list[str] = []
+        for m in self._memberships:
+            if m.index_name.upper() == index_name.upper() and m.is_active(utc_as_of):
+                if m.symbol not in active_symbols:
+                    active_symbols.append(m.symbol)
+        return active_symbols
+
+    def load_universe_at(
+        self,
+        index_name: str,
+        as_of: datetime,
+        version: str = "pit-v1",
+    ) -> Universe:
+        """Construct a Universe object representing exact point-in-time membership."""
+        members = self.constituents_at(index_name, as_of)
+        return Universe(
+            name=index_name,
+            version=version,
+            as_of=as_utc(as_of),
+            members=members,
+        )
+

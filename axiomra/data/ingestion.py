@@ -48,46 +48,107 @@ class IngestionResult:
 def adjust_splits(
     bars: list[Bar],
     actions: list[CorporateAction],
+    adjust_dividends: bool = False,
 ) -> tuple[list[Bar], bool]:
-    """Divide pre-ex-date prices by each forward split ratio.
+    """Adjust historical bars for splits (forward & reverse) and optional cash dividends.
 
-    Returns (adjusted_bars, adjusted) where adjusted is True when any bar
-    moved, which marks the series as adjusted in the snapshot metadata.
+    - Forward split (ratio > 1.0) & Reverse split (0 < ratio < 1.0):
+      Pre-ex-date prices are divided by ratio; volume is multiplied by ratio.
+    - Dividend (when adjust_dividends=True):
+      Pre-ex-date prices are multiplied by (1 - dividend_amount / pre_ex_close).
     """
     adjusted = False
     adjusted_bars = list(bars)
-    for action in sorted(actions, key=lambda a: a.ex_date):
-        if action.action_type != "SPLIT":
-            raise UnsupportedActionError(
-                f"{action.action_type} not supported yet (instrument {action.instrument_id})"
-            )
-        ratio = action.ratio
-        if ratio is None or ratio <= 0:
-            raise UnsupportedActionError(f"SPLIT with invalid ratio {ratio!r}")
-        if ratio < 1.0:
-            raise UnsupportedActionError(
-                f"reverse split ratio {ratio} not supported yet"
-            )
-        if ratio == 1.0:
-            continue
 
-        factor = ratio
-        adjusted = True
-        adjusted_bars = [
-            bar
-            if bar.timestamp >= action.ex_date
-            else bar.model_copy(
-                update={
-                    "open": bar.open / factor,
-                    "high": bar.high / factor,
-                    "low": bar.low / factor,
-                    "close": bar.close / factor,
-                    "volume": bar.volume * factor,
-                }
+    for action in sorted(actions, key=lambda a: a.ex_date):
+        if action.action_type == "SPLIT":
+            ratio = action.ratio
+            if ratio is None or ratio <= 0:
+                raise UnsupportedActionError(f"SPLIT with invalid ratio {ratio!r}")
+            if ratio < 1.0:
+                raise UnsupportedActionError(f"reverse split ratio {ratio} not supported under SPLIT; use REVERSE_SPLIT")
+            if ratio == 1.0:
+                continue
+
+            factor = ratio
+            adjusted = True
+            adjusted_bars = [
+                bar
+                if bar.timestamp >= action.ex_date
+                else bar.model_copy(
+                    update={
+                        "open": bar.open / factor,
+                        "high": bar.high / factor,
+                        "low": bar.low / factor,
+                        "close": bar.close / factor,
+                        "volume": bar.volume * factor,
+                    }
+                )
+                for bar in adjusted_bars
+            ]
+
+        elif action.action_type == "REVERSE_SPLIT":
+            ratio = action.ratio
+            if ratio is None or ratio <= 0:
+                raise UnsupportedActionError(f"REVERSE_SPLIT with invalid ratio {ratio!r}")
+            if ratio == 1.0:
+                continue
+
+            factor = ratio
+            adjusted = True
+            adjusted_bars = [
+                bar
+                if bar.timestamp >= action.ex_date
+                else bar.model_copy(
+                    update={
+                        "open": bar.open / factor,
+                        "high": bar.high / factor,
+                        "low": bar.low / factor,
+                        "close": bar.close / factor,
+                        "volume": bar.volume * factor,
+                    }
+                )
+                for bar in adjusted_bars
+            ]
+
+        elif action.action_type == "DIVIDEND":
+            if not adjust_dividends:
+                raise UnsupportedActionError("DIVIDEND action not supported when adjust_dividends=False")
+            amount = action.amount
+            if amount is None or amount <= 0:
+                continue
+
+            prior_bars = [b for b in adjusted_bars if b.timestamp < action.ex_date]
+            if not prior_bars:
+                continue
+            prior_close = prior_bars[-1].close
+            if prior_close <= amount:
+                continue
+
+            div_factor = 1.0 - (amount / prior_close)
+            adjusted = True
+            adjusted_bars = [
+                bar
+                if bar.timestamp >= action.ex_date
+                else bar.model_copy(
+                    update={
+                        "open": bar.open * div_factor,
+                        "high": bar.high * div_factor,
+                        "low": bar.low * div_factor,
+                        "close": bar.close * div_factor,
+                    }
+                )
+                for bar in adjusted_bars
+            ]
+
+        else:
+            raise UnsupportedActionError(
+                f"{action.action_type} not supported (instrument {action.instrument_id})"
             )
-            for bar in adjusted_bars
-        ]
+
     return adjusted_bars, adjusted
+
+
 
 
 def next_data_version(previous: str | None = None) -> str:

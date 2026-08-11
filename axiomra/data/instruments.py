@@ -59,20 +59,35 @@ class InstrumentMaster:
     """
 
     def __init__(self) -> None:
-        self._instruments: dict[str, Instrument] = {}
+        self._all_instruments: list[Instrument] = []
+        self._by_id: dict[str, list[Instrument]] = {}
         self._actions: dict[str, list[CorporateAction]] = {}
 
     def upsert(self, instrument: Instrument) -> None:
-        self._instruments[instrument.instrument_id] = instrument
+        self._all_instruments.append(instrument)
+        self._by_id.setdefault(instrument.instrument_id, []).append(instrument)
 
     def get(self, instrument_id: str) -> Instrument | None:
-        return self._instruments.get(instrument_id)
+        records = self._by_id.get(instrument_id, [])
+        return records[-1] if records else None
 
     def by_symbol(self, symbol: str, exchange: str = "NSE") -> Instrument | None:
-        for inst in self._instruments.values():
+        for inst in reversed(self._all_instruments):
             if inst.symbol == symbol and inst.exchange == exchange:
                 return inst
         return None
+
+    def resolve_symbol(
+        self, symbol: str, as_of: datetime, exchange: str = "NSE"
+    ) -> Instrument | None:
+        """Resolve a trading symbol at a specific point in time, respecting active window."""
+        utc_as_of = as_utc(as_of)
+        for inst in reversed(self._all_instruments):
+            if inst.symbol == symbol and inst.exchange == exchange:
+                if inst.active_from <= utc_as_of:
+                    if inst.active_until is None or utc_as_of <= inst.active_until:
+                        return inst
+        return self.by_symbol(symbol, exchange)
 
     def add_action(self, action: CorporateAction) -> None:
         self._actions.setdefault(action.instrument_id, []).append(action)
@@ -88,4 +103,6 @@ class InstrumentMaster:
         return [a for a in actions if a.ex_date < before]
 
     def __len__(self) -> int:
-        return len(self._instruments)
+        return len(self._all_instruments)
+
+
