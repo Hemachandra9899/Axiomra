@@ -175,3 +175,92 @@ def test_data_quality_checker_flags_invalid_bar():
     report = checker.check(snap)
     assert not report.valid
     assert report.total_issues > 0
+
+
+def test_inactive_old_symbol_returns_none():
+    """Requesting an inactive symbol outside its active window MUST return None (no dangerous fallback)."""
+    master = InstrumentMaster()
+    old_inst = Instrument(
+        instrument_id="inst-old",
+        symbol="OLD.NS",
+        active_from=datetime(2020, 1, 1, tzinfo=UTC),
+        active_until=datetime(2022, 12, 31, tzinfo=UTC),
+    )
+    master.upsert(old_inst)
+
+    # In 2024 (after active_until), resolving OLD.NS MUST return None
+    res = master.resolve_symbol("OLD.NS", datetime(2024, 1, 1, tzinfo=UTC))
+    assert res is None
+
+
+def test_future_index_member_not_in_historical_training_panel():
+    """ACCEPTANCE TEST: XYZ joins index in 2023 but bars exist since 2020. Pre-2023 rows MUST NOT appear in training frame."""
+    from axiomra.quant.trainer import build_training_frame
+
+    # XYZ joins index on 2023-01-01
+    membership = IndexMembership(
+        instrument_id="inst-xyz",
+        symbol="XYZ.NS",
+        index_name="NIFTY 50",
+        from_date=datetime(2023, 1, 1, tzinfo=UTC),
+    )
+
+    # Bars from 2020 to 2024 (500 days)
+    bars_xyz = _sample_bars("XYZ.NS", days=500, start_price=100.0)
+
+    uni = Universe(
+        name="NIFTY 50",
+        version="v1",
+        as_of=datetime.now(UTC),
+        members=["XYZ.NS"],
+    )
+    snap = create_snapshot(
+        universe=uni,
+        bars={"XYZ.NS": bars_xyz},
+        data_version="d1",
+        memberships=[membership],
+    )
+
+    frame = build_training_frame(snap)
+    assert not frame.empty
+
+    # Verify no training observations exist prior to 2023-01-01
+    xyz_pre_2023 = frame[
+        (frame["symbol"] == "XYZ.NS")
+        & (frame["date"] < datetime(2023, 1, 1, tzinfo=UTC))
+    ]
+    assert xyz_pre_2023.empty
+
+    # Verify post-2023 observations DO exist
+    xyz_post_2023 = frame[
+        (frame["symbol"] == "XYZ.NS")
+        & (frame["date"] >= datetime(2023, 1, 1, tzinfo=UTC))
+    ]
+    assert not xyz_post_2023.empty
+
+
+def test_index_membership_half_open_interval():
+    """Index membership intervals [from_date, until_date) are half-open."""
+    m = IndexMembership(
+        instrument_id="inst-1",
+        symbol="ABC.NS",
+        index_name="NIFTY 50",
+        from_date=datetime(2020, 1, 1, tzinfo=UTC),
+        until_date=datetime(2023, 1, 1, tzinfo=UTC),
+    )
+
+    assert m.is_active(datetime(2020, 1, 1, tzinfo=UTC)) is True
+    assert m.is_active(datetime(2022, 12, 31, tzinfo=UTC)) is True
+    # On until_date (2023-01-01), the old membership is inactive (half-open)
+    assert m.is_active(datetime(2023, 1, 1, tzinfo=UTC)) is False
+
+    # Invalid interval where until_date <= from_date MUST raise ValueError
+    with pytest.raises(ValueError):
+        IndexMembership(
+            instrument_id="inst-1",
+            symbol="ABC.NS",
+            index_name="NIFTY 50",
+            from_date=datetime(2023, 1, 1, tzinfo=UTC),
+            until_date=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+

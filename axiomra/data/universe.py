@@ -122,7 +122,6 @@ def load_universe_csv(
 
 
 class IndexMembership(BaseModel):
-
     """Point-in-time membership of an instrument in a market index."""
 
     instrument_id: str
@@ -136,11 +135,16 @@ class IndexMembership(BaseModel):
     def _utc(cls, value: datetime | None) -> datetime | None:
         return as_utc(value) if value is not None else None
 
+    def model_post_init(self, __context: object) -> None:
+        if self.until_date is not None and self.until_date <= self.from_date:
+            raise ValueError(f"until_date ({self.until_date}) must be > from_date ({self.from_date})")
+
     def is_active(self, as_of: datetime) -> bool:
+        """Half-open interval check: from_date <= as_of < until_date."""
         utc_as_of = as_utc(as_of)
         if utc_as_of < self.from_date:
             return False
-        if self.until_date is not None and utc_as_of > self.until_date:
+        if self.until_date is not None and utc_as_of >= self.until_date:
             return False
         return True
 
@@ -153,6 +157,20 @@ class HistoricalUniverseRegistry:
 
     def add_membership(self, membership: IndexMembership) -> None:
         self._memberships.append(membership)
+
+    def is_member(
+        self,
+        symbol_or_id: str,
+        as_of: datetime,
+        index_name: str | None = None,
+    ) -> bool:
+        """Check if an instrument or symbol was an active index member as of a date."""
+        utc_as_of = as_utc(as_of)
+        for m in self._memberships:
+            if index_name is None or m.index_name.upper() == index_name.upper():
+                if (m.symbol == symbol_or_id or m.instrument_id == symbol_or_id) and m.is_active(utc_as_of):
+                    return True
+        return False
 
     def constituents_at(self, index_name: str, as_of: datetime) -> list[str]:
         """Return symbols of all active index constituents as of a date."""
@@ -178,4 +196,5 @@ class HistoricalUniverseRegistry:
             as_of=as_utc(as_of),
             members=members,
         )
+
 

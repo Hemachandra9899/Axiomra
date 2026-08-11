@@ -67,11 +67,19 @@ def build_training_frame(
     """Stack per-symbol feature rows into one long frame with a target and label metadata.
 
     Columns: symbol, date, label_start, label_end, <features>, target. The frame is sorted by date so
-    cross-sectional row order is deterministic.
+    cross-sectional row order is deterministic. Point-in-time index membership is enforced when
+    snapshot.memberships is provided (preventing survivorship bias).
     """
     pipeline = FeaturePipeline()
     columns = feature_columns or pipeline.output_columns
     frames: list[pd.DataFrame] = []
+
+    membership_registry: HistoricalUniverseRegistry | None = None
+    if snapshot.memberships:
+        from axiomra.data.universe import HistoricalUniverseRegistry
+        membership_registry = HistoricalUniverseRegistry()
+        for m in snapshot.memberships:
+            membership_registry.add_membership(m)
 
     for symbol, bars in snapshot.bars.items():
         df = pd.DataFrame(
@@ -90,6 +98,16 @@ def build_training_frame(
         featured["symbol"] = symbol
         featured = featured.reset_index()
 
+        # Point-in-Time Survivorship Bias Filter: Drop rows where symbol was NOT an active index member
+        if membership_registry is not None:
+            is_member_mask = [
+                membership_registry.is_member(symbol, row_date)
+                for row_date in featured["date"]
+            ]
+            featured = featured[is_member_mask]
+
+        if featured.empty:
+            continue
 
         dates = featured["date"]
         featured["label_start"] = dates.shift(-1)
@@ -112,6 +130,7 @@ def build_training_frame(
     ]
     full = full.dropna(subset=["target", "label_start", "label_end", *feature_cols])
     return full.sort_values(["date", "symbol"]).reset_index(drop=True)
+
 
 
 

@@ -22,8 +22,8 @@ from datetime import UTC, date, datetime
 
 from axiomra.data.instruments import CorporateAction, InstrumentMaster
 from axiomra.data.providers.base import MarketDataProvider
-from axiomra.data.snapshot import create_snapshot
-from axiomra.data.universe import Universe
+from axiomra.data.snapshot import AdjustmentMode, create_snapshot
+from axiomra.data.universe import IndexMembership, Universe
 from axiomra.domain.market import Bar
 from axiomra.versions import DATA_VERSION_PREFIX
 
@@ -50,18 +50,13 @@ def adjust_splits(
     actions: list[CorporateAction],
     adjust_dividends: bool = False,
 ) -> tuple[list[Bar], bool]:
-    """Adjust historical bars for splits (forward & reverse) and optional cash dividends.
-
-    - Forward split (ratio > 1.0) & Reverse split (0 < ratio < 1.0):
-      Pre-ex-date prices are divided by ratio; volume is multiplied by ratio.
-    - Dividend (when adjust_dividends=True):
-      Pre-ex-date prices are multiplied by (1 - dividend_amount / pre_ex_close).
-    """
+    """Adjust historical bars for splits (forward & reverse) and optional cash dividends."""
     adjusted = False
     adjusted_bars = list(bars)
 
     for action in sorted(actions, key=lambda a: a.ex_date):
-        if action.action_type == "SPLIT":
+        action_type = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
+        if action_type == "SPLIT":
             ratio = action.ratio
             if ratio is None or ratio <= 0:
                 raise UnsupportedActionError(f"SPLIT with invalid ratio {ratio!r}")
@@ -87,7 +82,7 @@ def adjust_splits(
                 for bar in adjusted_bars
             ]
 
-        elif action.action_type == "REVERSE_SPLIT":
+        elif action_type == "REVERSE_SPLIT":
             ratio = action.ratio
             if ratio is None or ratio <= 0:
                 raise UnsupportedActionError(f"REVERSE_SPLIT with invalid ratio {ratio!r}")
@@ -111,7 +106,7 @@ def adjust_splits(
                 for bar in adjusted_bars
             ]
 
-        elif action.action_type == "DIVIDEND":
+        elif action_type == "DIVIDEND":
             if not adjust_dividends:
                 raise UnsupportedActionError("DIVIDEND action not supported when adjust_dividends=False")
             amount = action.amount
@@ -143,12 +138,10 @@ def adjust_splits(
 
         else:
             raise UnsupportedActionError(
-                f"{action.action_type} not supported (instrument {action.instrument_id})"
+                f"{action_type} not supported (instrument {action.instrument_id})"
             )
 
     return adjusted_bars, adjusted
-
-
 
 
 def next_data_version(previous: str | None = None) -> str:
@@ -174,6 +167,8 @@ class IngestionPipeline:
         end: date,
         timeframe: str = "1d",
         data_version: str | None = None,
+        adjustment_mode: AdjustmentMode = AdjustmentMode.SPLIT_ADJUSTED,
+        memberships: list[IndexMembership] | None = None,
     ) -> IngestionResult:
         version = data_version or next_data_version()
         bars_by_symbol: dict[str, list[Bar]] = {}
@@ -192,7 +187,8 @@ class IngestionPipeline:
                 continue
 
             actions = self.instruments.actions(instrument.instrument_id)
-            adjusted, moved = adjust_splits(raw, actions)
+            should_adjust_divs = (adjustment_mode == AdjustmentMode.TOTAL_RETURN)
+            adjusted, moved = adjust_splits(raw, actions, adjust_dividends=should_adjust_divs)
             bars_by_symbol[symbol] = adjusted
             all_actions.extend(actions)
             if moved:
@@ -203,6 +199,8 @@ class IngestionPipeline:
             bars=bars_by_symbol,
             data_version=version,
             actions=all_actions,
+            adjustment_mode=adjustment_mode,
+            memberships=memberships,
         )
 
         return IngestionResult(
@@ -214,3 +212,4 @@ class IngestionPipeline:
             adjusted_symbols=adjusted_symbols,
             created_at=snapshot.created_at,
         )
+
