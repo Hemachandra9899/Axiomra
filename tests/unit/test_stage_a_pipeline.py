@@ -49,7 +49,7 @@ def test_stage_a_pipeline_end_to_end(tmp_path: Path):
         for i, sym in enumerate(symbols, start=1)
     ]
     upstox_inst_provider = UpstoxInstrumentProvider(raw_store=raw_store)
-    master, inst_manifest, key_map = upstox_inst_provider.fetch_and_parse(
+    master, inst_manifest, key_map, symbol_map = upstox_inst_provider.fetch_and_parse(
         mock_bytes=json.dumps(mock_bod).encode("utf-8")
     )
     assert len(master._all_instruments) == 10

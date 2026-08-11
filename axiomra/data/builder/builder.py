@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -10,6 +11,7 @@ from axiomra.data.builder.config import DatasetBuildConfig
 from axiomra.data.builder.errors import (
     CoverageGateFailedError,
     DatasetBuildError,
+    IncompleteRunError,
     ReconciliationFailedError,
 )
 from axiomra.data.builder.report import BuildRunManifest, DatasetBuildReport
@@ -62,7 +64,7 @@ class DatasetBuilder:
         actions: list[CorporateAction] | None = None,
         raw_manifests: list[RawFetchManifest] | None = None,
         secondary_bars: dict[str, list[Bar]] | None = None,
-        data_origin: str = "provider",
+        data_origin: Literal["provider", "synthetic"] = "provider",
         synthetic_rows: int = 0,
     ) -> DatasetBuildResult:
         """Build, audit, persist, reload, and verify an immutable Parquet research dataset."""
@@ -72,6 +74,23 @@ class DatasetBuilder:
             requested_instruments=len(config.symbols),
             raw_fetches=[m.raw_path for m in (raw_manifests or [])],
         )
+
+        # 0. Enforce Provider Provenance Invariants & Requested Symbol Gate
+        if data_origin == "provider":
+            if len(raw_manifests or []) == 0:
+                raise ValueError("Invalid provider dataset build: raw_fetch_count is 0")
+            if synthetic_rows > 0:
+                raise ValueError(f"Invalid provider dataset build: synthetic_rows is {synthetic_rows} (must be 0)")
+
+        requested = set(config.symbols)
+        received = {sym for sym, b_list in bars.items() if len(b_list) > 0}
+        missing_symbols = requested - received
+        if missing_symbols:
+            run_manifest.status = "INCOMPLETE"
+            run_manifest.failed_instruments = sorted(missing_symbols)
+            raise IncompleteRunError(
+                f"Dataset build aborted: missing bars for {len(missing_symbols)} requested symbols: {sorted(missing_symbols)}"
+            )
 
         # 1. Provider Reconciliation (if secondary source provided)
         rec_report = None

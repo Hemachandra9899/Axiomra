@@ -60,6 +60,7 @@ def run_stage_a_real_build(
         memberships=acq_result.memberships,
         actions=acq_result.actions,
         raw_manifests=acq_result.raw_manifests,
+        secondary_bars=acq_result.secondary_bars,
         data_origin="provider",
         synthetic_rows=0,
     )

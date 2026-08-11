@@ -46,7 +46,7 @@ def test_upstox_instrument_provider_parsing(tmp_path: Path):
     raw_store = RawStore(root_dir=tmp_path / "raw", store=store)
     provider = UpstoxInstrumentProvider(raw_store=raw_store)
 
-    master, manifest, key_map = provider.fetch_and_parse(mock_bytes=mock_bytes)
+    master, manifest, key_map, symbol_map = provider.fetch_and_parse(mock_bytes=mock_bytes)
 
     assert manifest.provider == "upstox"
     assert manifest.resource_type == "instruments"

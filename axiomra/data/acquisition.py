@@ -7,6 +7,12 @@ import os
 from pydantic import BaseModel, Field
 
 from axiomra.data.builder.config import DatasetBuildConfig
+from axiomra.data.builder.errors import (
+    CorporateActionFetchError,
+    InstrumentResolutionFailedError,
+    MissingProviderCredentialsError,
+)
+from axiomra.data.ingestion import adjust_splits
 from axiomra.data.instruments import CorporateAction, InstrumentMaster
 from axiomra.data.nifty_membership import NIFTYMembershipProvider
 from axiomra.data.providers.nse import (
@@ -19,6 +25,7 @@ from axiomra.data.providers.upstox import (
     UpstoxHistoricalProvider,
     UpstoxInstrumentProvider,
 )
+from axiomra.data.snapshot import AdjustmentMode
 from axiomra.data.universe import IndexMembership
 from axiomra.domain.market import Bar
 from axiomra.storage.raw import RawFetchManifest, RawStore
@@ -59,20 +66,29 @@ class ProviderAcquisitionService:
         token: str | None = None,
     ) -> AcquisitionResult:
         """Acquire real provider data (BOD Master, OHLCV candles, Corporate Actions, Index Memberships)."""
+        access_token = token or os.environ.get("UPSTOX_ACCESS_TOKEN")
+        if not access_token:
+            raise MissingProviderCredentialsError(
+                "UPSTOX_ACCESS_TOKEN environment variable or token parameter is required for provider data acquisition."
+            )
+
         raw_manifests: list[RawFetchManifest] = []
 
-        # 1. Fetch & parse Upstox BOD Master
-        master, inst_manifest, key_map = self.upstox_inst_provider.fetch_and_parse()
+        # 1. Fetch & parse Upstox BOD Master with explicit symbol_map
+        master, inst_manifest, key_map, symbol_map = self.upstox_inst_provider.fetch_and_parse()
         raw_manifests.append(inst_manifest)
 
-        # 2. Build index memberships
+        # 2. Build Index Memberships with zero manufactured synthetic IDs
         memberships: list[IndexMembership] = []
         for sym in config.symbols:
             inst = master.resolve_symbol(sym, config.start_date) or master.by_symbol(sym)
-            inst_id = inst.instrument_id if inst else f"inst-{sym.lower().replace('.ns', '')}"
+            if inst is None:
+                raise InstrumentResolutionFailedError(
+                    f"Cannot resolve canonical instrument_id for '{sym}' in Upstox InstrumentMaster."
+                )
             memberships.append(
                 IndexMembership(
-                    instrument_id=inst_id,
+                    instrument_id=inst.instrument_id,
                     symbol=sym,
                     index_name=config.universe_name,
                     from_date=config.start_date,
@@ -80,38 +96,51 @@ class ProviderAcquisitionService:
                 )
             )
 
-        # 3. Fetch Upstox V3 historical candles or NSE Bhavcopy
-        bars: dict[str, list[Bar]] = {}
-        access_token = token or os.environ.get("UPSTOX_ACCESS_TOKEN")
+        # 3. Fetch Upstox V3 Historical Daily OHLCV Candles
+        hist_client = UpstoxClient(access_token=access_token)
+        hist_provider = UpstoxHistoricalProvider(raw_store=self.raw_store, client=hist_client)
+        raw_bars: dict[str, list[Bar]] = {}
 
-        if access_token:
-            hist_client = UpstoxClient(access_token=access_token)
-            hist_provider = UpstoxHistoricalProvider(raw_store=self.raw_store, client=hist_client)
-            for sym in config.symbols:
-                inst_key = key_map.get(sym) or f"NSE_EQ|{sym.replace('.NS', '')}"
-                sym_bars, h_manifest = hist_provider.fetch_and_parse_candles(
-                    instrument_key=inst_key,
-                    symbol=sym,
-                    start_date=config.start_date.strftime("%Y-%m-%d"),
-                    end_date=config.end_date.strftime("%Y-%m-%d"),
+        for sym in config.symbols:
+            inst_key = symbol_map.get(sym) or symbol_map.get(sym.replace(".NS", ""))
+            if not inst_key:
+                raise InstrumentResolutionFailedError(
+                    f"No Upstox provider instrument_key mapping found for trading symbol '{sym}'."
                 )
-                bars[sym] = sym_bars
-                raw_manifests.append(h_manifest)
-        else:
-            # Fall back to live NSE Bhavcopy acquisition across date range
-            pass
+            sym_bars, h_manifest = hist_provider.fetch_and_parse_candles(
+                instrument_key=inst_key,
+                symbol=sym,
+                start_date=config.start_date.strftime("%Y-%m-%d"),
+                end_date=config.end_date.strftime("%Y-%m-%d"),
+            )
+            raw_bars[sym] = sym_bars
+            raw_manifests.append(h_manifest)
 
-        # 4. Fetch NSE Corporate Actions
+        # 4. Fetch & Parse NSE Corporate Actions (Raise on failure for SPLIT_ADJUSTED datasets)
         actions: list[CorporateAction] = []
         try:
             ca_bytes, ca_manifest = self.nse_client.fetch_corporate_actions_bytes()
             actions, _ = self.nse_actions_provider.parse_actions_bytes(raw_bytes=ca_bytes, instruments=master)
             raw_manifests.append(ca_manifest)
-        except Exception:
-            pass
+        except Exception as err:
+            if config.adjustment_mode != AdjustmentMode.RAW:
+                raise CorporateActionFetchError(
+                    f"Corporate action acquisition failed for {config.adjustment_mode.value} dataset: {err}"
+                ) from err
+
+        # 5. Apply Axiomra-Owned Corporate Action Adjustment Transformation
+        adjusted_bars: dict[str, list[Bar]] = {}
+        for sym, b_list in raw_bars.items():
+            sym_actions = [a for a in actions if a.instrument_id == master.resolve_symbol(sym).instrument_id]
+            sym_adj, _ = adjust_splits(
+                bars=b_list,
+                actions=sym_actions,
+                adjustment_mode=config.adjustment_mode,
+            )
+            adjusted_bars[sym] = sym_adj
 
         return AcquisitionResult(
-            bars=bars,
+            bars=adjusted_bars,
             instruments=master,
             memberships=memberships,
             actions=actions,

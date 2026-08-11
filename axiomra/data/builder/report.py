@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,7 @@ class DatasetBuildReport(BaseModel):
     date_range: str
     instrument_count: int
     bar_count: int
-    data_origin: str = "provider"  # 'provider' vs 'synthetic'
+    data_origin: Literal["provider", "synthetic"] = "provider"
     synthetic_rows: int = 0
     raw_fetch_count: int = 0
     raw_source_shas: list[str] = Field(default_factory=list)

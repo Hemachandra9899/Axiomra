@@ -8,14 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from axiomra.data.acquisition import ProviderAcquisitionService
 from axiomra.data.builder import (
     DatasetBuildConfig,
     DatasetBuilder,
     IncompleteRunError,
-    run_stage_a_fixture,
-    run_stage_b_fixture,
-    run_stage_c_fixture,
 )
+from axiomra.data.builder.errors import MissingProviderCredentialsError
+from axiomra.data.builder.stage_a_fixture import run_stage_a_fixture
+from axiomra.data.builder.stage_b_fixture import run_stage_b_fixture
+from axiomra.data.builder.stage_c_fixture import run_stage_c_fixture
 from axiomra.data.instruments import Instrument, InstrumentMaster
 from axiomra.data.persistence.models import DatasetQualityError
 from axiomra.data.persistence.parquet import ParquetDatasetRepository
@@ -43,7 +45,6 @@ def test_dataset_builder_quality_fail_fast(tmp_path: Path):
         )
     )
 
-    # Bar with High (50.0) < max(Open, Close) (100.0) fails DataQualityChecker rules
     bad_bars = {
         "BAD.NS": [
             Bar(symbol="BAD.NS", timestamp=start_dt, open=100.0, high=50.0, low=40.0, close=90.0, volume=1000.0)
@@ -73,7 +74,83 @@ def test_dataset_builder_quality_fail_fast(tmp_path: Path):
             bars=bad_bars,
             instruments=master,
             memberships=memberships,
+            data_origin="synthetic",
         )
+
+
+def test_dataset_builder_missing_requested_symbols_raises(tmp_path: Path):
+    """DatasetBuilder must raise IncompleteRunError if any requested symbol is missing bars."""
+    start_dt = datetime(2024, 1, 1, tzinfo=UTC)
+    end_dt = datetime(2024, 1, 10, tzinfo=UTC)
+
+    raw_store = RawStore(root_dir=tmp_path / "raw")
+    repository = ParquetDatasetRepository(store=LocalArtifactStore(root_dir=tmp_path / "out"))
+    builder = DatasetBuilder(raw_store=raw_store, repository=repository)
+
+    config = DatasetBuildConfig(
+        universe_name="TEST-MISSING",
+        symbols=["MISSING.NS"],
+        start_date=start_dt,
+        end_date=end_dt,
+    )
+
+    with pytest.raises(IncompleteRunError, match="missing bars for 1 requested symbols"):
+        builder.build(
+            config=config,
+            bars={},
+            instruments=InstrumentMaster(),
+            memberships=[],
+            data_origin="synthetic",
+        )
+
+
+def test_dataset_builder_provider_origin_provenance_invariants(tmp_path: Path):
+    """DatasetBuilder must reject data_origin='provider' if raw_fetch_count is 0 or synthetic_rows > 0."""
+    start_dt = datetime(2024, 1, 1, tzinfo=UTC)
+    end_dt = datetime(2024, 1, 10, tzinfo=UTC)
+
+    raw_store = RawStore(root_dir=tmp_path / "raw")
+    repository = ParquetDatasetRepository(store=LocalArtifactStore(root_dir=tmp_path / "out"))
+    builder = DatasetBuilder(raw_store=raw_store, repository=repository)
+
+    config = DatasetBuildConfig(
+        universe_name="TEST-PROV",
+        symbols=["SYM.NS"],
+        start_date=start_dt,
+        end_date=end_dt,
+    )
+
+    bars = {
+        "SYM.NS": [
+            Bar(symbol="SYM.NS", timestamp=start_dt, open=100.0, high=105.0, low=95.0, close=101.0, volume=1000.0)
+        ]
+    }
+
+    with pytest.raises(ValueError, match="raw_fetch_count is 0"):
+        builder.build(
+            config=config,
+            bars=bars,
+            instruments=InstrumentMaster(),
+            memberships=[],
+            data_origin="provider",
+            raw_manifests=[],
+        )
+
+
+def test_provider_acquisition_missing_token_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """ProviderAcquisitionService must raise MissingProviderCredentialsError if UPSTOX_ACCESS_TOKEN is missing."""
+    monkeypatch.delenv("UPSTOX_ACCESS_TOKEN", raising=False)
+    service = ProviderAcquisitionService(raw_store=RawStore(root_dir=tmp_path / "raw"))
+
+    config = DatasetBuildConfig(
+        universe_name="TEST-ACQ",
+        symbols=["RELIANCE.NS"],
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 10, tzinfo=UTC),
+    )
+
+    with pytest.raises(MissingProviderCredentialsError, match="UPSTOX_ACCESS_TOKEN"):
+        service.acquire(config=config)
 
 
 def test_dataset_builder_manifest_checksum_lineage(tmp_path: Path):
@@ -86,7 +163,6 @@ def test_dataset_builder_manifest_checksum_lineage(tmp_path: Path):
     assert result.report.data_origin == "synthetic"
     assert result.report.synthetic_rows > 0
 
-    # Verify logical_checksum and artifact_checksum are 64-char SHA256 hex strings
     assert len(result.report.logical_checksum) == 64
     assert len(result.report.artifact_checksum) == 64
     assert result.report.logical_checksum != result.snapshot.dataset_id
@@ -107,7 +183,6 @@ def test_stage_a_fixture_end_to_end(tmp_path: Path):
     assert result.report.quarantined_rows == 0
     assert result.coverage_report.ready_for_dataset is True
 
-    # Report JSON output test
     report_file = output_dir / "stage-a-fixture-report.json"
     assert report_file.exists()
     report_data = json.loads(report_file.read_text(encoding="utf-8"))
@@ -115,7 +190,6 @@ def test_stage_a_fixture_end_to_end(tmp_path: Path):
     assert report_data["data_origin"] == "synthetic"
     assert len(report_data["logical_checksum"]) == 64
 
-    # Parquet reload & exact logical SHA verification test
     repository = ParquetDatasetRepository(store=LocalArtifactStore(root_dir=output_dir))
     loaded = repository.load(result.snapshot.dataset_id)
     assert loaded.snapshot.dataset_id == result.snapshot.dataset_id

@@ -1,9 +1,10 @@
 """Data quality validation suite.
 
 Validates point-in-time market snapshots before feature computation and model training:
-1. OHLC sanity checks (positive prices, High >= Open/Close, Low <= Open/Close).
-2. Price outlier detection (single-day price jumps exceeding max threshold).
-3. Bar gap detection (unexplained calendar gaps between consecutive bars).
+1. Non-empty dataset check (symbols > 0 and bars > 0).
+2. OHLC sanity checks (positive prices, High >= Open/Close, Low <= Open/Close).
+3. Price outlier detection (single-day price jumps exceeding max threshold).
+4. Bar gap detection (unexplained calendar gaps between consecutive bars).
 """
 
 from __future__ import annotations
@@ -44,12 +45,16 @@ class DataQualityChecker:
     def check(self, snapshot: DatasetSnapshot) -> DataQualityReport:
         checks: list[DataQualityCheckResult] = []
 
+        empty_issues: list[str] = []
         ohlc_issues: list[str] = []
         outlier_issues: list[str] = []
         gap_issues: list[str] = []
 
         total_bars = 0
         total_symbols = len(snapshot.bars)
+
+        if total_symbols == 0:
+            empty_issues.append("Empty dataset: total_symbols is 0")
 
         for symbol, bars in snapshot.bars.items():
             total_bars += len(bars)
@@ -86,6 +91,16 @@ class DataQualityChecker:
                             f"{symbol}: gap of {gap} days between {bars[i - 1].timestamp.date()} and {bar.timestamp.date()}"
                         )
 
+        if total_bars == 0:
+            empty_issues.append("Empty dataset: total_bars is 0")
+
+        checks.append(
+            DataQualityCheckResult(
+                rule_name="non_empty",
+                passed=len(empty_issues) == 0,
+                issues=empty_issues,
+            )
+        )
         checks.append(
             DataQualityCheckResult(
                 rule_name="ohlc_bounds",

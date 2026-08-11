@@ -8,6 +8,7 @@ from pathlib import Path
 from axiomra.data.acquisition import ProviderAcquisitionService
 from axiomra.data.builder.builder import DatasetBuilder, DatasetBuildResult
 from axiomra.data.builder.config import DatasetBuildConfig
+from axiomra.data.builder.errors import IncompleteRunError
 from axiomra.data.persistence.parquet import ParquetDatasetRepository
 from axiomra.data.snapshot import AdjustmentMode
 from axiomra.storage.local import LocalArtifactStore
@@ -38,10 +39,12 @@ def run_stage_c_real_build(
         min_coverage_ratio=0.98,
     )
 
-    acq_result = acquisition_service.acquire(config=config, token=token)
+    if not config.symbols:
+        raise IncompleteRunError(
+            "Historical PIT NIFTY 200 membership history source required for Stage C real build."
+        )
 
-    symbols_list = list(acq_result.bars.keys()) or ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS"]
-    config.symbols = symbols_list
+    acq_result = acquisition_service.acquire(config=config, token=token)
 
     result = builder.build(
         config=config,
@@ -50,6 +53,7 @@ def run_stage_c_real_build(
         memberships=acq_result.memberships,
         actions=acq_result.actions,
         raw_manifests=acq_result.raw_manifests,
+        secondary_bars=acq_result.secondary_bars,
         data_origin="provider",
         synthetic_rows=0,
     )
