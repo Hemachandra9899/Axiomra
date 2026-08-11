@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from axiomra.data.instruments import InstrumentMaster
 from axiomra.data.universe import IndexMembership
 from axiomra.storage.raw import RawFetchManifest, RawStore
 
@@ -38,9 +39,14 @@ class NIFTYMembershipProvider:
         index_name: str = "NIFTY 200",
         source_reference: str = "official_reconstitution_history_v1",
         reconstruction_version: str = "nifty200-reconstructed-v1",
+        instruments: InstrumentMaster | None = None,
         parser_version: str = "v1",
     ) -> tuple[list[IndexMembership], list[ReconstructedMembershipRecord], RawFetchManifest]:
-        """Parse raw membership constituent JSON bytes into IndexMembership list and detailed records."""
+        """Parse raw membership constituent JSON bytes into IndexMembership list and detailed records.
+
+        Enforces strict integrity: requires explicit valid_from date and canonical instrument_id resolution.
+        Does NOT manufacture arbitrary synthetic dates or IDs.
+        """
         filename = f"membership_{index_name.lower().replace(' ', '_')}_{reconstruction_version}.json"
         manifest = self.raw_store.put_raw(
             provider="nifty_indices",
@@ -62,17 +68,39 @@ class NIFTYMembershipProvider:
         now_utc = datetime.now(UTC)
 
         for item in raw_list:
-            symbol = str(item["symbol"]).strip()
-            symbol_ns = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
-            instrument_id = str(item.get("instrument_id") or f"inst-nse-{symbol.replace('.NS', '')}").strip()
+            symbol = str(item.get("symbol", "")).strip()
+            if not symbol:
+                raise ValueError("Membership source item missing 'symbol' field")
 
-            from_dt = datetime.fromisoformat(str(item["from_date"])) if "from_date" in item else datetime(2017, 1, 1, tzinfo=UTC)
+            symbol_ns = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
+
+            if "from_date" not in item or not item["from_date"]:
+                raise ValueError(
+                    f"Missing required 'from_date' for index constituent '{symbol_ns}'. "
+                    "Manufacturing arbitrary historical start dates is prohibited."
+                )
+
+            from_dt = datetime.fromisoformat(str(item["from_date"]))
             until_dt = datetime.fromisoformat(str(item["until_date"])) if item.get("until_date") else None
 
             if from_dt.tzinfo is None:
                 from_dt = from_dt.replace(tzinfo=UTC)
             if until_dt is not None and until_dt.tzinfo is None:
                 until_dt = until_dt.replace(tzinfo=UTC)
+
+            # Strict canonical instrument_id resolution
+            instrument_id = str(item.get("instrument_id", "")).strip()
+            if not instrument_id:
+                if instruments is not None:
+                    resolved = instruments.resolve_symbol(symbol_ns, from_dt)
+                    if resolved is not None:
+                        instrument_id = resolved.instrument_id
+
+            if not instrument_id:
+                raise ValueError(
+                    f"Cannot resolve canonical instrument_id for index constituent '{symbol_ns}' "
+                    f"as of {from_dt.isoformat()}. Manufacturing synthetic IDs is prohibited."
+                )
 
             mem = IndexMembership(
                 instrument_id=instrument_id,

@@ -23,6 +23,9 @@ class ReconciliationConfig(BaseModel):
     max_volume_diff_pct: float = 5.0
     """Maximum allowed difference in volume in percentage points (5.0 = 5%)."""
 
+    fail_on_missing: bool = True
+    """Whether unexpected missing dates from a provider cause report.valid to evaluate to False."""
+
 
 class ReconciliationItem(BaseModel):
     """Detailed reconciliation check result for a single symbol × date."""
@@ -53,7 +56,10 @@ class ReconciliationReport(BaseModel):
 
     @property
     def valid(self) -> bool:
-        return self.quarantined_count == 0
+        """True if zero quarantined bars AND (if fail_on_missing) zero missing provider dates."""
+        has_no_quarantine = self.quarantined_count == 0
+        has_no_missing = not self.config.fail_on_missing or len(self.missing_dates) == 0
+        return has_no_quarantine and has_no_missing
 
 
 class ProviderReconciler:

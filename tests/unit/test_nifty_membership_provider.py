@@ -51,3 +51,23 @@ def test_nifty_membership_provider_provenance(tmp_path: Path):
     assert rec0.instrument_id == "inst-isin-INE002A01018"
     assert rec0.reconstruction_version == "nifty200-reconstructed-v1"
     assert rec0.source == "NSE Indices reconstitution notices & constituent snapshots"
+
+
+def test_nifty_membership_provider_strict_missing_from_date_raises(tmp_path: Path):
+    """Missing 'from_date' in membership record must raise ValueError."""
+    mock_bad = [{"symbol": "RELIANCE.NS", "instrument_id": "inst-1"}]
+    provider = NIFTYMembershipProvider(raw_store=RawStore(root_dir=tmp_path / "raw"))
+
+    import pytest
+    with pytest.raises(ValueError, match="from_date"):
+        provider.parse_membership_source_bytes(json.dumps(mock_bad).encode("utf-8"))
+
+
+def test_nifty_membership_provider_unresolvable_instrument_id_raises(tmp_path: Path):
+    """Unresolvable 'instrument_id' in membership record must raise ValueError."""
+    mock_bad = [{"symbol": "UNKNOWN.NS", "from_date": "2020-01-01T00:00:00+00:00"}]
+    provider = NIFTYMembershipProvider(raw_store=RawStore(root_dir=tmp_path / "raw"))
+
+    import pytest
+    with pytest.raises(ValueError, match="instrument_id"):
+        provider.parse_membership_source_bytes(json.dumps(mock_bad).encode("utf-8"))

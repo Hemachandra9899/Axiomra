@@ -54,11 +54,15 @@ class RawStore:
         parser_version: str = "v1",
     ) -> RawFetchManifest:
         """Store raw unparsed bytes and generate SHA-256 `RawFetchManifest`."""
-        key = f"{provider}/{resource_type}/{filename}"
+        now_utc = datetime.now(UTC)
         sha = sha256_bytes(data)
+        timestamp_tag = now_utc.strftime("%Y%m%dT%H%M%SZ")
+        sha_prefix = sha[:8]
+        key = f"{provider}/{resource_type}/{timestamp_tag}/{sha_prefix}/{filename}"
+
         manifest = RawFetchManifest(
             provider=provider,
-            fetched_at=datetime.now(UTC),
+            fetched_at=now_utc,
             resource_type=resource_type,
             request_parameters=request_parameters or {},
             raw_path=key,

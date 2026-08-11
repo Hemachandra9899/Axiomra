@@ -51,8 +51,9 @@ def test_reconciliation_missing_dates_flagged():
         Bar(symbol="RELIANCE.NS", timestamp=dt2, open=2540.0, high=2560.0, low=2520.0, close=2550.0, volume=1200000.0),
     ]
 
-    reconciler = ProviderReconciler()
+    reconciler = ProviderReconciler(ReconciliationConfig(fail_on_missing=True))
     report = reconciler.reconcile_symbol_series("RELIANCE.NS", u_bars, n_bars)
 
     assert len(report.missing_dates) == 1
     assert report.missing_dates[0]["missing_provider"] == "upstox"
+    assert report.valid is False  # fail_on_missing=True marks report invalid
