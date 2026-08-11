@@ -62,7 +62,9 @@ class CorporateAction(BaseModel):
     ex_date: datetime
     ratio: float | None = None  # e.g. 2.0 for a 2-for-1 split, 0.2 for 1-for-5 reverse split
     amount: float | None = None  # for dividends
+    currency: str = "INR"
     note: str | None = None
+
 
     @field_validator("ex_date")
     @classmethod
