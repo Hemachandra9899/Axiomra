@@ -24,19 +24,39 @@ except ImportError:  # pragma: no cover
 DEFAULT_HORIZON_DAYS = 5
 
 
+def execution_aligned_return(
+    close: pd.Series,
+    open_: pd.Series,
+    horizon: int = DEFAULT_HORIZON_DAYS,
+) -> pd.Series:
+    """Execution-aligned return over `horizon` bars: close[t+h] / open[t+1] - 1.
+
+    Entry occurs at open of T+1 and exit occurs at close of T+h.
+    """
+    return close.shift(-horizon) / open_.shift(-1) - 1.0
+
+
+def close_to_close_forward_return(
+    close: pd.Series,
+    horizon: int = DEFAULT_HORIZON_DAYS,
+) -> pd.Series:
+    """Close-to-close fallback return over `horizon` bars: close[t+h] / close[t] - 1."""
+    return close.shift(-horizon) / close - 1.0
+
+
 def forward_return(
     close: pd.Series,
     open_: pd.Series | None = None,
     horizon: int = DEFAULT_HORIZON_DAYS,
 ) -> pd.Series:
-    """Execution-aligned return over `horizon` bars: close[t+h] / open[t+1] - 1.
+    """Return over `horizon` bars.
 
-    When `open_` is provided, entry occurs at open of T+1 and exit at close of T+h.
-    If `open_` is None, falls back to close[t+h] / close[t] - 1.
+    Delegates to `execution_aligned_return` when `open_` is provided, or
+    `close_to_close_forward_return` when `open_` is None.
     """
     if open_ is not None:
-        return close.shift(-horizon) / open_.shift(-1) - 1.0
-    return close.shift(-horizon) / close - 1.0
+        return execution_aligned_return(close, open_, horizon)
+    return close_to_close_forward_return(close, horizon)
 
 
 def build_training_frame(
@@ -66,9 +86,10 @@ def build_training_frame(
         ).set_index("date")
 
         featured = pipeline.compute(df)
-        featured["target"] = forward_return(featured["close"], featured["open"], horizon)
+        featured["target"] = execution_aligned_return(featured["close"], featured["open"], horizon)
         featured["symbol"] = symbol
         featured = featured.reset_index()
+
 
         dates = featured["date"]
         featured["label_start"] = dates.shift(-1)

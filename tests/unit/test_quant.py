@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pandas as pd
 import pytest
 
 from axiomra.domain.market import OHLCV, MarketSnapshot
@@ -12,6 +13,11 @@ from axiomra.quant.base import QuantEnsemble
 from axiomra.quant.calibration import CalibrationTable, Calibrator
 from axiomra.quant.ensemble import ensemble_quant
 from axiomra.quant.momentum import MomentumBaseline
+from axiomra.quant.trainer import (
+    close_to_close_forward_return,
+    execution_aligned_return,
+    forward_return,
+)
 
 
 def _snapshot(features: dict) -> MarketSnapshot:
@@ -115,3 +121,19 @@ def test_calibration_build_and_lookup():
 
 def test_calibration_empty():
     assert CalibrationTable.build([], []).buckets == []
+
+
+def test_execution_aligned_target():
+    open_ = pd.Series([100.0, 102.0, 105.0, 110.0])
+    close = pd.Series([101.0, 104.0, 108.0, 112.0])
+
+    exec_ret = execution_aligned_return(close, open_, horizon=2)
+    assert exec_ret.iloc[0] == pytest.approx(108.0 / 102.0 - 1.0)
+
+    c2c_ret = close_to_close_forward_return(close, horizon=2)
+    assert c2c_ret.iloc[0] == pytest.approx(108.0 / 101.0 - 1.0)
+
+    assert forward_return(close, open_, horizon=2).iloc[0] == pytest.approx(exec_ret.iloc[0])
+    assert forward_return(close, None, horizon=2).iloc[0] == pytest.approx(c2c_ret.iloc[0])
+
+

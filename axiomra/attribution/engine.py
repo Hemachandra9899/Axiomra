@@ -70,12 +70,45 @@ def _is_hit(entry: JournalEntry) -> bool:
 
 
 
+MIN_RELIABILITY_OBSERVATIONS: int = 30
+
+
+def signal_was_correct(signal_score: float, realized_return: float) -> bool:
+    """Evaluate whether an evidence source's own score direction matched the outcome.
+
+    A bullish score (> 0) is correct when realized_return > 0.
+    A bearish score (< 0) is correct when realized_return < 0.
+    A neutral score (0) is a miss.
+    """
+    if signal_score == 0:
+        return False
+    return signal_score * realized_return > 0
+
+
 def _add_segment(
     dims: dict[str, dict[str, dict]], dimension: str, key: str, entry: JournalEntry
 ) -> None:
     bucket = dims.setdefault(dimension, {}).setdefault(key, {"n": 0, "hits": 0, "ret": 0.0, "conf": 0.0})
     bucket["n"] += 1
     if _is_hit(entry):
+        bucket["hits"] += 1
+    bucket["ret"] += entry.outcome_return_pct or 0.0
+    bucket["conf"] += entry.confidence
+
+
+def _add_source_segment(
+    dims: dict[str, dict[str, dict]],
+    source: str,
+    signal_score: float,
+    entry: JournalEntry,
+) -> None:
+    bucket = dims.setdefault("source", {}).setdefault(
+        source, {"n": 0, "hits": 0, "ret": 0.0, "conf": 0.0}
+    )
+    bucket["n"] += 1
+    if entry.outcome_return_pct is not None and signal_was_correct(
+        signal_score, entry.outcome_return_pct
+    ):
         bucket["hits"] += 1
     bucket["ret"] += entry.outcome_return_pct or 0.0
     bucket["conf"] += entry.confidence
@@ -112,7 +145,11 @@ def attribute_outcomes(
     alpha: float = 25.0,
     beta: float = 25.0,
 ) -> AttributionReport:
-    """Segment journaled decisions by regime, sector, source and overall."""
+    """Segment journaled decisions by regime, sector, source and overall.
+
+    Overall/regime/sector attribution uses the portfolio decision direction.
+    Source attribution uses each evidence signal's own score direction.
+    """
     dims: dict[str, dict[str, dict]] = {}
 
     for entry in entries:
@@ -127,7 +164,8 @@ def attribute_outcomes(
 
         for signal in entry.evidence:
             source = signal.get("source") or "unknown"
-            _add_segment(dims, "source", source, entry)
+            score = float(signal.get("score", 0.0))
+            _add_source_segment(dims, source, score, entry)
 
     return AttributionReport(
         generated_at=datetime.now(UTC),
@@ -139,13 +177,19 @@ def build_source_reliability(
     report: AttributionReport,
     floor: float = 0.10,
     ceiling: float = 0.95,
+    min_observations: int = MIN_RELIABILITY_OBSERVATIONS,
+    default_reliability: float = 0.50,
 ) -> dict[str, float]:
     """Smoothed per-source reliability for fusion weighting.
 
-    Clamped into [floor, ceiling] so no source is fully trusted or fully
-    ignored regardless of sample size.
+    Clamped into [floor, ceiling]. If a source has fewer observations than
+    `min_observations`, returns default_reliability (0.50).
     """
     result: dict[str, float] = {}
     for seg in report.segments("source"):
-        result[seg.key] = min(ceiling, max(floor, seg.hit_rate))
+        if seg.n < min_observations:
+            result[seg.key] = default_reliability
+        else:
+            result[seg.key] = min(ceiling, max(floor, seg.hit_rate))
     return result
+

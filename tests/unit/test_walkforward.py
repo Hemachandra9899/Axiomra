@@ -177,3 +177,39 @@ def test_run_walk_forward_returns_report():
         assert -1.0 <= fold.ic <= 1.0
         assert -1.0 <= fold.rank_ic <= 1.0
     assert -1.0 <= report.mean_ic <= 1.0
+
+
+def test_train_labels_never_overlap_test():
+    """Verify that training samples whose label_end extends into test_start are purged."""
+    snap = _synthetic_snapshot(days=300)
+    frame = build_training_frame(snap, horizon=5)
+    assert "label_end" in frame.columns
+
+    dates = sorted(frame["date"].unique())
+    splitter = WalkForwardSplitter(n_splits=3, min_train_days=30)
+    folds = splitter.folds(dates)
+
+    for train_dates, test_dates in folds:
+        test_start = min(test_dates)
+        purged_train = frame[
+            frame["date"].isin(train_dates) & (frame["label_end"] < test_start)
+        ]
+        if not purged_train.empty:
+            assert purged_train["label_end"].max() < test_start
+
+
+def test_top_quintile_is_selected_per_day():
+    from axiomra.backtest.walkforward import evaluate_daily_predictions
+
+    # 2 dates, 4 symbols each
+    # Day 1: predictions [0.1, 0.2, 0.3, 0.9], targets [0.01, 0.02, 0.03, 0.04] -> top 25% (k=1) is pred=0.9 -> target=0.04
+    # Day 2: predictions [0.4, 0.5, 0.6, 0.8], targets [0.05, 0.06, 0.07, 0.10] -> top 25% (k=1) is pred=0.8 -> target=0.10
+    # Average daily top quintile return = (0.04 + 0.10) / 2 = 0.07
+    dates = [datetime(2024, 1, 1, tzinfo=UTC)] * 4 + [datetime(2024, 1, 2, tzinfo=UTC)] * 4
+    targets = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.10]
+    preds = np.array([0.1, 0.2, 0.3, 0.9, 0.4, 0.5, 0.6, 0.8])
+
+    test_frame = pd.DataFrame({"date": dates, "target": targets})
+    metrics = evaluate_daily_predictions(test_frame, preds, top_fraction=0.25)
+    assert metrics["top_quintile_return"] == pytest.approx(0.07)
+

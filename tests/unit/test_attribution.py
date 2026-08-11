@@ -94,7 +94,7 @@ def test_reliability_feeds_fusion_weighting():
         for i in range(10)
     ]
     report = attribute_outcomes(entries)
-    rel = build_source_reliability(report)
+    rel = build_source_reliability(report, min_observations=5)
     assert rel["quant"] > 0.5  # 8/10 raw, smoothed up from the 0.5 prior
 
     engine = SignalFusionEngine()
@@ -107,3 +107,65 @@ def test_reliability_feeds_fusion_weighting():
     w_with_history = engine.config.effective_weight(signal)
     w_default = engine_default.config.effective_weight(signal)
     assert w_with_history > w_default
+
+
+def test_bearish_source_loses_on_positive_return():
+    """A bearish signal (-0.8) under a LONG decision must count as a MISS when return is positive."""
+    entry = JournalEntry(
+        decision_id="1",
+        symbol="AAA.NS",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        data_version="d1",
+        feature_version="f1",
+        regime="TREND_UP",
+        confidence=0.5,
+        proposed_action="LONG",
+        risk_status="APPROVED",
+        evidence=[
+            {"source": "quant", "score": 0.8, "confidence": 0.5},
+            {"source": "news", "score": -0.8, "confidence": 0.5},
+        ],
+        outcome_return_pct=0.05,  # positive return
+    )
+    report = attribute_outcomes([entry], alpha=1.0, beta=1.0)
+    sources = {seg.key: seg for seg in report.segments("source")}
+
+    # quant is bullish (+0.8) and return is +5% -> HIT
+    assert sources["quant"].hits == 1
+    # news is bearish (-0.8) and return is +5% -> MISS
+    assert sources["news"].hits == 0
+
+
+def test_bullish_source_wins_on_positive_return():
+    entry = JournalEntry(
+        decision_id="1",
+        symbol="AAA.NS",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        data_version="d1",
+        feature_version="f1",
+        regime="TREND_UP",
+        confidence=0.5,
+        proposed_action="LONG",
+        risk_status="APPROVED",
+        evidence=[
+            {"source": "quant", "score": 0.8, "confidence": 0.5},
+        ],
+        outcome_return_pct=0.05,
+    )
+    report = attribute_outcomes([entry], alpha=1.0, beta=1.0)
+    sources = {seg.key: seg for seg in report.segments("source")}
+    assert sources["quant"].hits == 1
+
+
+def test_min_reliability_observations_gate():
+    entries = [_entry(f"{i}", "AAA.NS", "TREND_UP", 0.05, ["quant"]) for i in range(10)]
+    report = attribute_outcomes(entries)
+
+    # With min_observations=30, 10 samples is less than 30 -> returns default 0.50
+    rel_gated = build_source_reliability(report, min_observations=30)
+    assert rel_gated["quant"] == 0.50
+
+    # With min_observations=5, 10 samples >= 5 -> returns learned smoothed hit rate
+    rel_ungated = build_source_reliability(report, min_observations=5)
+    assert rel_ungated["quant"] > 0.50
+

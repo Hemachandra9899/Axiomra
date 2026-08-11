@@ -149,6 +149,7 @@ def evaluate_daily_predictions(
     df["pred"] = preds
     daily_ics: list[float] = []
     daily_rank_ics: list[float] = []
+    daily_top_returns: list[float] = []
 
     for _, group in df.groupby("date"):
         if len(group) >= 2:
@@ -157,28 +158,24 @@ def evaluate_daily_predictions(
             daily_ics.append(_pearson(y_t, y_p))
             daily_rank_ics.append(_spearman(y_t, y_p))
 
+            k = max(1, int(np.ceil(len(group) * top_fraction)))
+            top_group = group.nlargest(k, "pred")
+            daily_top_returns.append(float(top_group["target"].mean()))
+
     mean_ic = float(np.mean(daily_ics)) if daily_ics else 0.0
     std_ic = float(np.std(daily_ics)) if len(daily_ics) > 1 else 0.0
     ic_ir = mean_ic / std_ic if std_ic > 0 else 0.0
     pct_positive = float(np.mean(np.array(daily_ics) > 0)) if daily_ics else 0.0
+    top_quintile_ret = float(np.mean(daily_top_returns)) if daily_top_returns else 0.0
 
     y_true = df["target"].to_numpy(dtype=float)
     y_pred = df["pred"].to_numpy(dtype=float)
     valid = ~np.isnan(y_true)
-    if valid.sum() < 2:
-        return {
-            "ic": mean_ic,
-            "rank_ic": float(np.mean(daily_rank_ics)) if daily_rank_ics else 0.0,
-            "ic_ir": ic_ir,
-            "pct_positive_ic": pct_positive,
-            "hit_rate": 0.0,
-            "top_quintile_return": 0.0,
-        }
-
-    k = max(1, int(round(len(y_pred) * top_fraction)))
-    idx = np.argsort(y_pred)[::-1][:k]
-    top_ret = float(y_true[idx].mean()) if len(y_true) else 0.0
-    hit_rate = float(np.mean((y_true * np.sign(y_pred)) > 0)) if len(y_true) else 0.0
+    hit_rate = (
+        float(np.mean((y_true[valid] * np.sign(y_pred[valid])) > 0))
+        if valid.sum() > 0
+        else 0.0
+    )
 
     return {
         "ic": mean_ic,
@@ -186,7 +183,7 @@ def evaluate_daily_predictions(
         "ic_ir": ic_ir,
         "pct_positive_ic": pct_positive,
         "hit_rate": hit_rate,
-        "top_quintile_return": top_ret,
+        "top_quintile_return": top_quintile_ret,
     }
 
 
@@ -244,12 +241,17 @@ def run_walk_forward(
         if not train.empty and "label_end" in train.columns:
             assert train["label_end"].max() < test_start
 
+        actual_train_days = train["date"].nunique()
+        if actual_train_days < min_train_days:
+            continue
+
         x_tr = train[feature_cols].to_numpy(dtype=float)
         y_tr = train["target"].to_numpy(dtype=float)
         x_te = test[feature_cols].to_numpy(dtype=float)
 
         if len(x_tr) < 20 or len(x_te) < 2:
             continue
+
 
         model = estimator_factory(x_tr, y_tr)  # type: ignore[operator]
         preds = np.asarray(model.predict(x_te), dtype=float)
