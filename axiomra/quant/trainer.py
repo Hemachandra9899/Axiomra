@@ -12,11 +12,13 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
+from axiomra.data.instruments import InstrumentMaster
 from axiomra.data.snapshot import DatasetSnapshot
 from axiomra.features.pipeline import FeaturePipeline
 from axiomra.quant.lightgbm import DEFAULT_FEATURES, LightGBMQuantModel
 
 try:  # pragma: no cover - exercised only when lightgbm is present
+
     import lightgbm as lgbm
 except ImportError:  # pragma: no cover
     lgbm = None  # type: ignore[assignment]
@@ -60,15 +62,17 @@ def forward_return(
 
 
 def build_training_frame(
+
     snapshot: DatasetSnapshot,
     horizon: int = DEFAULT_HORIZON_DAYS,
     feature_columns: list[str] | None = None,
+    instruments: InstrumentMaster | None = None,
 ) -> pd.DataFrame:
     """Stack per-symbol feature rows into one long frame with a target and label metadata.
 
     Columns: symbol, date, label_start, label_end, <features>, target. The frame is sorted by date so
-    cross-sectional row order is deterministic. Point-in-time index membership is enforced when
-    snapshot.memberships is provided (preventing survivorship bias).
+    cross-sectional row order is deterministic. Point-in-time index membership is enforced via instrument_id/symbol
+    when snapshot.memberships is provided (preventing survivorship bias).
     """
     pipeline = FeaturePipeline()
     columns = feature_columns or pipeline.output_columns
@@ -77,6 +81,7 @@ def build_training_frame(
     membership_registry: HistoricalUniverseRegistry | None = None
     if snapshot.memberships:
         from axiomra.data.universe import HistoricalUniverseRegistry
+
         membership_registry = HistoricalUniverseRegistry()
         for m in snapshot.memberships:
             membership_registry.add_membership(m)
@@ -98,16 +103,25 @@ def build_training_frame(
         featured["symbol"] = symbol
         featured = featured.reset_index()
 
-        # Point-in-Time Survivorship Bias Filter: Drop rows where symbol was NOT an active index member
+        # Point-in-Time Survivorship Bias Filter: Drop rows where instrument_id or symbol was NOT an active index member
         if membership_registry is not None:
-            is_member_mask = [
-                membership_registry.is_member(symbol, row_date)
-                for row_date in featured["date"]
-            ]
+            is_member_mask = []
+            for row_date in featured["date"]:
+                target_id = symbol
+                if instruments is not None:
+                    inst = instruments.resolve_symbol(symbol, row_date)
+                    if inst is not None:
+                        target_id = inst.instrument_id
+
+                is_member_mask.append(
+                    membership_registry.is_member(target_id, row_date)
+                    or membership_registry.is_member(symbol, row_date)
+                )
             featured = featured[is_member_mask]
 
         if featured.empty:
             continue
+
 
         dates = featured["date"]
         featured["label_start"] = dates.shift(-1)

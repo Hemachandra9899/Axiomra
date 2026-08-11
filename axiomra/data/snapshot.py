@@ -108,6 +108,20 @@ def _canonical_json(snapshot: DatasetSnapshot) -> str:
             }
             for a in sorted(snapshot.actions, key=lambda a: (a.instrument_id, a.ex_date.isoformat()))
         ],
+        "memberships": [
+            {
+                "instrument_id": m.instrument_id,
+                "symbol": m.symbol,
+                "index_name": m.index_name,
+                "from_date": m.from_date.isoformat(),
+                "until_date": m.until_date.isoformat() if m.until_date else None,
+            }
+            for m in sorted(
+                snapshot.memberships,
+                key=lambda m: (m.index_name, m.instrument_id, m.from_date.isoformat()),
+            )
+        ],
+
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 

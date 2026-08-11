@@ -49,13 +49,24 @@ def adjust_splits(
     bars: list[Bar],
     actions: list[CorporateAction],
     adjust_dividends: bool = False,
+    adjustment_mode: AdjustmentMode = AdjustmentMode.SPLIT_ADJUSTED,
 ) -> tuple[list[Bar], bool]:
-    """Adjust historical bars for splits (forward & reverse) and optional cash dividends."""
+    """Adjust historical bars for splits (forward & reverse) and optional cash dividends based on AdjustmentMode.
+
+    - AdjustmentMode.RAW: return raw unadjusted bars directly.
+    - AdjustmentMode.SPLIT_ADJUSTED: adjust forward splits & reverse splits; ignore cash dividends without error.
+    - AdjustmentMode.TOTAL_RETURN: adjust forward splits, reverse splits, and cash dividends.
+    """
+    if adjustment_mode == AdjustmentMode.RAW:
+        return list(bars), False
+
+    should_adjust_divs = adjust_dividends or (adjustment_mode == AdjustmentMode.TOTAL_RETURN)
     adjusted = False
     adjusted_bars = list(bars)
 
     for action in sorted(actions, key=lambda a: a.ex_date):
         action_type = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
+
         if action_type == "SPLIT":
             ratio = action.ratio
             if ratio is None or ratio <= 0:
@@ -107,8 +118,10 @@ def adjust_splits(
             ]
 
         elif action_type == "DIVIDEND":
-            if not adjust_dividends:
-                raise UnsupportedActionError("DIVIDEND action not supported when adjust_dividends=False")
+            if not should_adjust_divs:
+                # SPLIT_ADJUSTED mode ignores dividends silently
+                continue
+
             amount = action.amount
             if amount is None or amount <= 0:
                 continue
@@ -136,12 +149,16 @@ def adjust_splits(
                 for bar in adjusted_bars
             ]
 
+        elif action_type in {"SYMBOL_CHANGE", "MERGER", "DELISTING"}:
+            continue
+
         else:
             raise UnsupportedActionError(
                 f"{action_type} not supported (instrument {action.instrument_id})"
             )
 
     return adjusted_bars, adjusted
+
 
 
 def next_data_version(previous: str | None = None) -> str:

@@ -202,13 +202,14 @@ def test_adjust_splits_forward_only():
 
 def test_adjust_splits_rejects_unsupported_actions():
     bars = [_bar("R.NS", datetime(2022, 7, 1, tzinfo=UTC), 100.0)]
-    dividend = CorporateAction(
+    unsupported = CorporateAction(
         instrument_id="i",
-        action_type="DIVIDEND",
+        action_type="UNSUPPORTED_TYPE",
         ex_date=datetime(2022, 7, 15, tzinfo=UTC),
     )
     with pytest.raises(UnsupportedActionError):
-        adjust_splits(bars, [dividend])
+        adjust_splits(bars, [unsupported])
+
 
 
 def test_adjust_splits_rejects_reverse_split():

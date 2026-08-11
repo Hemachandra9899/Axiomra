@@ -264,3 +264,119 @@ def test_index_membership_half_open_interval():
             until_date=datetime(2020, 1, 1, tzinfo=UTC),
         )
 
+
+def test_membership_change_changes_dataset_checksum():
+    """Modifying index membership records MUST change the canonical snapshot checksum and dataset_id."""
+    bars = _sample_bars("AAA.NS", days=3)
+
+    uni = Universe(name="TEST", version="v1", as_of=datetime.now(UTC), members=["AAA.NS"])
+
+    m1 = IndexMembership(
+        instrument_id="inst-1",
+        symbol="AAA.NS",
+        index_name="TEST",
+        from_date=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+    m2 = IndexMembership(
+        instrument_id="inst-1",
+        symbol="AAA.NS",
+        index_name="TEST",
+        from_date=datetime(2023, 1, 1, tzinfo=UTC),  # Different joining date
+    )
+
+    snap1 = create_snapshot(universe=uni, bars={"AAA.NS": bars}, data_version="d1", memberships=[m1])
+    snap2 = create_snapshot(universe=uni, bars={"AAA.NS": bars}, data_version="d1", memberships=[m2])
+
+    assert snap1.checksum != snap2.checksum
+    assert snap1.dataset_id != snap2.dataset_id
+
+
+def test_adjustment_mode_semantics():
+    """Verify AdjustmentMode.RAW (unadjusted), SPLIT_ADJUSTED (splits only, dividends ignored without error), and TOTAL_RETURN (splits + dividends)."""
+    from axiomra.data.snapshot import AdjustmentMode
+
+    bars = _sample_bars("AAA.NS", days=4, start_price=100.0)  # closes: 100, 102, 104, 106
+    split_action = CorporateAction(
+        instrument_id="inst-1",
+        action_type="SPLIT",
+        ex_date=datetime(2024, 1, 3, tzinfo=UTC),
+        ratio=2.0,
+    )
+    div_action = CorporateAction(
+        instrument_id="inst-1",
+        action_type="DIVIDEND",
+        ex_date=datetime(2024, 1, 3, tzinfo=UTC),
+        amount=10.0,
+    )
+    actions = [split_action, div_action]
+
+    # Mode 1: RAW -> No adjustment applied
+    bars_raw, moved_raw = adjust_splits(bars, actions, adjustment_mode=AdjustmentMode.RAW)
+    assert not moved_raw
+    assert bars_raw[0].close == 100.0
+
+    # Mode 2: SPLIT_ADJUSTED -> Split applied (100 / 2 = 50), Dividend ignored without error
+    bars_split, moved_split = adjust_splits(bars, actions, adjustment_mode=AdjustmentMode.SPLIT_ADJUSTED)
+    assert moved_split
+    assert bars_split[0].close == 50.0
+
+    # Mode 3: TOTAL_RETURN -> Split applied (100 / 2 = 50), Dividend applied (factor = 1 - 10/51)
+    bars_tr, moved_tr = adjust_splits(bars, actions, adjustment_mode=AdjustmentMode.TOTAL_RETURN)
+    assert moved_tr
+    div_factor = 1.0 - 10.0 / 51.0
+    expected_tr_close = 50.0 * div_factor
+    assert bars_tr[0].close == pytest.approx(expected_tr_close)
+
+
+def test_symbol_rename_retains_index_membership():
+    """Symbol rename OLD.NS -> NEW.NS for same instrument_id MUST retain continuous index membership across the rename."""
+    from axiomra.quant.trainer import build_training_frame
+
+    master = InstrumentMaster()
+    inst_old = Instrument(
+        instrument_id="INST-123",
+        symbol="OLD.NS",
+        active_from=datetime(2020, 1, 1, tzinfo=UTC),
+        active_until=datetime(2022, 12, 31, tzinfo=UTC),
+    )
+    inst_new = Instrument(
+        instrument_id="INST-123",
+        symbol="NEW.NS",
+        active_from=datetime(2023, 1, 1, tzinfo=UTC),
+    )
+    master.upsert(inst_old)
+    master.upsert(inst_new)
+
+    # Membership recorded under INST-123 starting 2020-01-01
+    membership = IndexMembership(
+        instrument_id="INST-123",
+        symbol="NEW.NS",
+        index_name="NIFTY 50",
+        from_date=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+
+    # Bars generated under OLD.NS starting 2020-01-01 (within OLD.NS active window)
+    start = datetime(2020, 1, 1, tzinfo=UTC)
+    bars_old = [
+        Bar(
+            symbol="OLD.NS",
+            timestamp=start + timedelta(days=i),
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=10000.0,
+        )
+        for i in range(100)
+    ]
+
+    uni = Universe(name="NIFTY 50", version="v1", as_of=datetime.now(UTC), members=["OLD.NS"])
+    snap = create_snapshot(universe=uni, bars={"OLD.NS": bars_old}, data_version="d1", memberships=[membership])
+
+    # Frame built with InstrumentMaster mapping resolves OLD.NS -> INST-123 -> matches membership INST-123
+    frame = build_training_frame(snap, instruments=master)
+    assert not frame.empty
+    assert (frame["symbol"] == "OLD.NS").all()
+
+
+
