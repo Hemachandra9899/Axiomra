@@ -1,0 +1,54 @@
+{
+  "schema_version": "dataset-v1",
+  "dataset_id": "ds-9d817d91d296",
+  "logical_checksum": "9d817d91d2966004272e9e55bb637d86685694a6e9a5bbdad1d0b563319c37bc",
+  "artifact_checksum": "f4b10fdd2b8b2fb29eed7f720c8896d2f9a33c99758852f01acfa0352117ea6e",
+  "created_at": "2026-08-11T18:07:35.593406Z",
+  "data_version": "v1",
+  "adjustment_mode": "split_adjusted",
+  "universe_name": "NIFTY 200",
+  "universe_version": "v1",
+  "universe_as_of": "2026-01-01T00:00:00Z",
+  "universe_members": [
+    "RELIANCE.NS",
+    "TCS.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+    "INFY.NS",
+    "OLDCO.NS"
+  ],
+  "start_date": "2017-01-02",
+  "end_date": "2025-12-31",
+  "instrument_count": 6,
+  "bar_count": 13044,
+  "files": {
+    "bars.parquet": {
+      "path": "datasets/ds-9d817d91d296/bars.parquet",
+      "sha256": "e9c4cdd44fb6ff8956a71845c4ec22ec30255ca55726bd3d27e266e011a39f92",
+      "rows": 13044
+    },
+    "instruments.parquet": {
+      "path": "datasets/ds-9d817d91d296/instruments.parquet",
+      "sha256": "bbb57bcb0d98ecdd1feb1de35c7dae909a7d5332d63c4137e7b52c86510bf022",
+      "rows": 6
+    },
+    "memberships.parquet": {
+      "path": "datasets/ds-9d817d91d296/memberships.parquet",
+      "sha256": "80459fc493b39d4927b3b570c08e088e1e8b3ba2e0c505a127e41c3d754eec2d",
+      "rows": 6
+    },
+    "corporate_actions.parquet": {
+      "path": "datasets/ds-9d817d91d296/corporate_actions.parquet",
+      "sha256": "48b128d924c89067e240a97a5fdd14668c8d838db701b0e1016d87f5c41482ad",
+      "rows": 0
+    },
+    "quality_report.json": {
+      "path": "datasets/ds-9d817d91d296/quality_report.json",
+      "sha256": "5b52a16e2881a76af02b6abfa6aecde640083e06a3f1d3862b98eff70e5a1d0b",
+      "rows": 3
+    }
+  },
+  "source": null,
+  "source_version": null,
+  "git_commit": null
+}

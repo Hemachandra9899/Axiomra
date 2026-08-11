@@ -1,0 +1,22 @@
+{
+  "valid": true,
+  "total_symbols": 50,
+  "total_bars": 26100,
+  "checks": [
+    {
+      "rule_name": "ohlc_bounds",
+      "passed": true,
+      "issues": []
+    },
+    {
+      "rule_name": "price_outliers",
+      "passed": true,
+      "issues": []
+    },
+    {
+      "rule_name": "bar_gaps",
+      "passed": true,
+      "issues": []
+    }
+  ]
+}

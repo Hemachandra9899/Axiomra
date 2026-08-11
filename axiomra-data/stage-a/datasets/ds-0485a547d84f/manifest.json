@@ -1,0 +1,58 @@
+{
+  "schema_version": "dataset-v1",
+  "dataset_id": "ds-0485a547d84f",
+  "logical_checksum": "0485a547d84f06ccae95117c1aafe163abac22e4408c2f17628792e60fa37144",
+  "artifact_checksum": "a773a8ed64bb7e1e8eb8a7829761b719a21841b8aa04e01ca7fd4abbe52e0400",
+  "created_at": "2026-08-11T18:07:33.465423Z",
+  "data_version": "v1",
+  "adjustment_mode": "split_adjusted",
+  "universe_name": "STAGE-A-10",
+  "universe_version": "v1",
+  "universe_as_of": "2024-06-30T00:00:00Z",
+  "universe_members": [
+    "RELIANCE.NS",
+    "TCS.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+    "INFY.NS",
+    "SBIN.NS",
+    "LT.NS",
+    "ITC.NS",
+    "BHARTIARTL.NS",
+    "MARUTI.NS"
+  ],
+  "start_date": "2024-01-01",
+  "end_date": "2024-06-28",
+  "instrument_count": 10,
+  "bar_count": 1300,
+  "files": {
+    "bars.parquet": {
+      "path": "datasets/ds-0485a547d84f/bars.parquet",
+      "sha256": "79f002ad0f71fe8a2f76a81e91acfb1fe1103dc289acd534dd8b3291f6f9fd55",
+      "rows": 1300
+    },
+    "instruments.parquet": {
+      "path": "datasets/ds-0485a547d84f/instruments.parquet",
+      "sha256": "f47f15cc0c31e55e4631558f50e193b5e02f4bd407d7e112b5e20041a7512696",
+      "rows": 10
+    },
+    "memberships.parquet": {
+      "path": "datasets/ds-0485a547d84f/memberships.parquet",
+      "sha256": "a7b31d6261fdade428bf5f45b20d15e701db5673dce35f8d5e7ef0beb476200a",
+      "rows": 10
+    },
+    "corporate_actions.parquet": {
+      "path": "datasets/ds-0485a547d84f/corporate_actions.parquet",
+      "sha256": "03fa2a865db22dc6ebfb385bf8b9fc2bf3e88919ca3ed08e919c2b7cab84dd92",
+      "rows": 1
+    },
+    "quality_report.json": {
+      "path": "datasets/ds-0485a547d84f/quality_report.json",
+      "sha256": "baa63e631b0f4eb1d14c56546fdc0394521fa2c146a4a5b91779366c202efa9e",
+      "rows": 3
+    }
+  },
+  "source": null,
+  "source_version": null,
+  "git_commit": null
+}
