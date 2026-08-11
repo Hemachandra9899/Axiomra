@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
+
+
+def get_git_sha() -> str:
+    """Resolve current git HEAD commit SHA dynamically at runtime."""
+    try:
+        res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True)
+        return res.stdout.strip()
+    except Exception:
+        return "unknown"
 
 
 class DatasetBuildReport(BaseModel):
@@ -15,6 +25,8 @@ class DatasetBuildReport(BaseModel):
     date_range: str
     instrument_count: int
     bar_count: int
+    data_origin: str = "provider"  # 'provider' vs 'synthetic'
+    synthetic_rows: int = 0
     raw_fetch_count: int = 0
     raw_source_shas: list[str] = Field(default_factory=list)
     coverage_by_instrument: dict[str, float] = Field(default_factory=dict)
@@ -24,7 +36,7 @@ class DatasetBuildReport(BaseModel):
     corporate_action_count: int = 0
     logical_checksum: str
     artifact_checksum: str = ""
-    build_git_sha: str = "71ad28d"
+    build_git_sha: str = Field(default_factory=get_git_sha)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def to_json(self, indent: int = 2) -> str:

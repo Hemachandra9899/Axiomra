@@ -1,0 +1,31 @@
+{
+  "dataset_id": "ds-28177a25f38c",
+  "universe_name": "STAGE-A-FIXTURE",
+  "date_range": "2024-01-01T00:00:00+00:00 / 2024-06-30T00:00:00+00:00",
+  "instrument_count": 10,
+  "bar_count": 1300,
+  "data_origin": "synthetic",
+  "synthetic_rows": 1300,
+  "raw_fetch_count": 0,
+  "raw_source_shas": [],
+  "coverage_by_instrument": {
+    "RELIANCE.NS": 1.0833333333333333,
+    "TCS.NS": 1.0833333333333333,
+    "HDFCBANK.NS": 1.0833333333333333,
+    "ICICIBANK.NS": 1.0833333333333333,
+    "INFY.NS": 1.0833333333333333,
+    "SBIN.NS": 1.0833333333333333,
+    "LT.NS": 1.0833333333333333,
+    "ITC.NS": 1.0833333333333333,
+    "BHARTIARTL.NS": 1.0833333333333333,
+    "MARUTI.NS": 1.0833333333333333
+  },
+  "missing_sessions": 0,
+  "reconciliation_discrepancies": 0,
+  "quarantined_rows": 0,
+  "corporate_action_count": 1,
+  "logical_checksum": "28177a25f38c6fb72771790fcf574d4bbafa7556dad384182beabe53ba99cee6",
+  "artifact_checksum": "f59ecb1082ba7690377e13c8da033afbb834367bb19daea0709407174fe60baf",
+  "build_git_sha": "567bf02",
+  "generated_at": "2026-08-11T18:23:17.437695Z"
+}

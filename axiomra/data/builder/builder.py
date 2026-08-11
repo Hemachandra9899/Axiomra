@@ -15,6 +15,7 @@ from axiomra.data.builder.errors import (
 from axiomra.data.builder.report import BuildRunManifest, DatasetBuildReport
 from axiomra.data.coverage import CoverageAnalyzer, HistoricalInstrumentCoverageReport
 from axiomra.data.instruments import CorporateAction, InstrumentMaster
+from axiomra.data.persistence.models import DatasetQualityError
 from axiomra.data.persistence.parquet import ParquetDatasetRepository
 from axiomra.data.quality import DataQualityChecker, DataQualityReport
 from axiomra.data.reconciliation import (
@@ -61,6 +62,8 @@ class DatasetBuilder:
         actions: list[CorporateAction] | None = None,
         raw_manifests: list[RawFetchManifest] | None = None,
         secondary_bars: dict[str, list[Bar]] | None = None,
+        data_origin: str = "provider",
+        synthetic_rows: int = 0,
     ) -> DatasetBuildResult:
         """Build, audit, persist, reload, and verify an immutable Parquet research dataset."""
         run_id = f"run_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}"
@@ -101,11 +104,14 @@ class DatasetBuilder:
             data_version="v1",
         )
 
-        # 3. Data Quality Checks
+        # 3. Data Quality Checks (Fail-Fast Gate)
         q_report = self.quality_checker.check(snapshot)
         if not q_report.valid:
             run_manifest.status = "FAILED"
             run_manifest.notes.append(f"{q_report.total_issues} quality check issues detected")
+            raise DatasetQualityError(
+                f"Cannot save dataset {snapshot.dataset_id}: failed quality check ({q_report.total_issues} issues)"
+            )
 
         # 4. Coverage Audit
         analyzer = CoverageAnalyzer(min_coverage_ratio=config.min_coverage_ratio)
@@ -126,9 +132,9 @@ class DatasetBuilder:
 
         run_manifest.successful_instruments = len(config.symbols)
 
-        # 5. Persist Parquet Research Dataset
-        self.repository.save(snapshot, instruments=instruments)
-        run_manifest.dataset_id = snapshot.dataset_id
+        # 5. Persist Parquet Research Dataset & Retrieve DatasetManifest Checksum Lineage
+        manifest = self.repository.save(snapshot, instruments=instruments)
+        run_manifest.dataset_id = manifest.dataset_id
 
         # 6. Verification: Reload & Logical Checksum Round-Trip Test
         loaded_dataset = self.repository.load(snapshot.dataset_id)
@@ -143,11 +149,13 @@ class DatasetBuilder:
         raw_shas = [m.sha256 for m in (raw_manifests or [])]
 
         report = DatasetBuildReport(
-            dataset_id=snapshot.dataset_id,
+            dataset_id=manifest.dataset_id,
             universe_name=config.universe_name,
             date_range=f"{config.start_date.isoformat()} / {config.end_date.isoformat()}",
             instrument_count=len(snapshot.universe.members),
             bar_count=snapshot.bar_count(),
+            data_origin=data_origin,
+            synthetic_rows=synthetic_rows,
             raw_fetch_count=len(raw_manifests or []),
             raw_source_shas=raw_shas,
             coverage_by_instrument=coverage_map,
@@ -155,8 +163,8 @@ class DatasetBuilder:
             reconciliation_discrepancies=rec_report.discrepancies_count if rec_report else 0,
             quarantined_rows=q_report.total_issues,
             corporate_action_count=len(snapshot.actions),
-            logical_checksum=snapshot.dataset_id,
-            artifact_checksum=snapshot.dataset_id,
+            logical_checksum=manifest.logical_checksum,
+            artifact_checksum=manifest.artifact_checksum,
         )
 
         run_manifest.completed_at = datetime.now(UTC)

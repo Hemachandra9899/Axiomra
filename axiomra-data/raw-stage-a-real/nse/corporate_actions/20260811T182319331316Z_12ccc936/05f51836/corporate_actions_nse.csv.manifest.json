@@ -1,0 +1,9 @@
+{
+  "provider": "nse",
+  "fetched_at": "2026-08-11T18:23:19.331316Z",
+  "resource_type": "corporate_actions",
+  "request_parameters": {},
+  "raw_path": "nse/corporate_actions/20260811T182319331316Z_12ccc936/05f51836/corporate_actions_nse.csv",
+  "sha256": "05f518362bab6aee02824748677c39ac6a2b0535465f6c659231dc5e79457a05",
+  "parser_version": "v1"
+}
