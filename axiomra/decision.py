@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axiomra.agents.orchestrator import ResearchOrchestrator
 from axiomra.domain.market import MarketSnapshot
@@ -42,9 +42,10 @@ class DecisionResult(BaseModel):
     regime: str
     classification: SignalClassification
     candidate: TradeCandidate | None = None
-    evidence: list[EvidenceSignal] = []
+    evidence: list[EvidenceSignal] = Field(default_factory=list)
     skeptic: SkepticReview | None = None
     fusion: FusionResult | None = None
+
 
 
 @dataclass

@@ -44,7 +44,7 @@ def test_attribution_segments_by_regime_and_source():
         _entry("3", "BBB.NS", "RANGE", 0.01, ["fundamental"]),
         _entry("4", "CCC.NS", "TREND_DOWN", None, ["quant"]),  # no outcome
     ]
-    report = attribute_outcomes(entries, sector_of={"AAA.NS": "Energy"})
+    report = attribute_outcomes(entries, sector_of={"AAA.NS": "Energy"}, alpha=1.0, beta=1.0)
 
     overall = report.segments("overall")
     assert len(overall) == 1

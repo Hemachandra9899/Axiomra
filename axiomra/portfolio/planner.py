@@ -68,3 +68,21 @@ def plan_reduce(
         quantity=current_quantity,
         decision_id=decision_id,
     )
+
+
+def resolve_order_side(
+    action: str,
+    current_quantity: int,
+) -> OrderSide | None:
+    """Determine the order side for long-only V1 given an action and current position.
+
+    A LONG signal returns BUY.
+    A REDUCE signal on an existing position returns SELL.
+    A REDUCE signal on zero holding returns None (no shorting in long-only V1).
+    """
+    if action == "LONG":
+        return OrderSide.BUY
+    if action == "REDUCE" and current_quantity > 0:
+        return OrderSide.SELL
+    return None
+

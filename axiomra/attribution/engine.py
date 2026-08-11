@@ -38,11 +38,17 @@ class AttributionReport(BaseModel):
         return self.dimensions.get(dimension, [])
 
 
-def _smooth_hit_rate(hits: int, n: int, alpha: float = 1.0, beta: float = 1.0) -> float:
-    """Beta posterior mean: (hits + alpha) / (n + alpha + beta).
+def _smooth_hit_rate(
+    hits: int,
+    n: int,
+    alpha: float = 25.0,
+    beta: float = 25.0,
+) -> float:
+    """Bayesian prior smoothing: (hits + alpha) / (n + alpha + beta).
 
-    With alpha = beta = 1 the estimate shrinks toward 0.5 as n -> 0 and
-    approaches the raw rate as n grows.
+    With alpha = beta = 25.0 (prior_mean = 0.5, prior_strength = 50), small samples
+    shrink strongly toward the 0.5 prior (e.g., 3/3 -> 28/53 = 0.5283) rather than
+    producing extreme 1.0 reliability values.
     """
     if n <= 0:
         return 0.5
@@ -50,13 +56,18 @@ def _smooth_hit_rate(hits: int, n: int, alpha: float = 1.0, beta: float = 1.0) -
 
 
 def _is_hit(entry: JournalEntry) -> bool:
-    """A long-only decision hits when the forward return is positive.
+    """Direction-aware hit evaluation.
 
-    V1 is long-only; direction-aware hits arrive with short exposure.
+    For LONG decisions, positive forward return is a hit.
+    For REDUCE / SHORT decisions, negative forward return is a hit.
     """
     if entry.outcome_return_pct is None:
         return False
+    if entry.proposed_action in {"REDUCE", "SHORT"}:
+        return entry.outcome_return_pct < 0.0
     return entry.outcome_return_pct > 0.0
+
+
 
 
 def _add_segment(
@@ -98,8 +109,8 @@ def _finalize(
 def attribute_outcomes(
     entries: list[JournalEntry],
     sector_of: dict[str, str] | None = None,
-    alpha: float = 1.0,
-    beta: float = 1.0,
+    alpha: float = 25.0,
+    beta: float = 25.0,
 ) -> AttributionReport:
     """Segment journaled decisions by regime, sector, source and overall."""
     dims: dict[str, dict[str, dict]] = {}

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axiomra.data.repository import DataRepository
 from axiomra.decision import DecisionEngine, DecisionResult
@@ -31,7 +31,8 @@ class PipelineOutcome(BaseModel):
     proposal: PortfolioProposal | None = None
     risk: RiskDecision | None = None
     execution: ExecutionResult | None = None
-    reasons: list[str] = []
+    reasons: list[str] = Field(default_factory=list)
+
 
 
 @dataclass

@@ -24,12 +24,18 @@ except ImportError:  # pragma: no cover
 DEFAULT_HORIZON_DAYS = 5
 
 
-def forward_return(close: pd.Series, horizon: int = DEFAULT_HORIZON_DAYS) -> pd.Series:
-    """Return over the next `horizon` bars: close[t+h] / close[t] - 1.
+def forward_return(
+    close: pd.Series,
+    open_: pd.Series | None = None,
+    horizon: int = DEFAULT_HORIZON_DAYS,
+) -> pd.Series:
+    """Execution-aligned return over `horizon` bars: close[t+h] / open[t+1] - 1.
 
-    Rows without a future close (the last `horizon` rows) become NaN and are
-    dropped by `build_training_frame`, so no label leakage is possible.
+    When `open_` is provided, entry occurs at open of T+1 and exit at close of T+h.
+    If `open_` is None, falls back to close[t+h] / close[t] - 1.
     """
+    if open_ is not None:
+        return close.shift(-horizon) / open_.shift(-1) - 1.0
     return close.shift(-horizon) / close - 1.0
 
 
@@ -38,9 +44,9 @@ def build_training_frame(
     horizon: int = DEFAULT_HORIZON_DAYS,
     feature_columns: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Stack per-symbol feature rows into one long frame with a target.
+    """Stack per-symbol feature rows into one long frame with a target and label metadata.
 
-    Columns: symbol, date, <features>, target. The frame is sorted by date so
+    Columns: symbol, date, label_start, label_end, <features>, target. The frame is sorted by date so
     cross-sectional row order is deterministic.
     """
     pipeline = FeaturePipeline()
@@ -60,25 +66,32 @@ def build_training_frame(
         ).set_index("date")
 
         featured = pipeline.compute(df)
-        featured["target"] = forward_return(featured["close"], horizon)
+        featured["target"] = forward_return(featured["close"], featured["open"], horizon)
         featured["symbol"] = symbol
         featured = featured.reset_index()
+
+        dates = featured["date"]
+        featured["label_start"] = dates.shift(-1)
+        featured["label_end"] = dates.shift(-horizon)
 
         # Keep only requested features that carry any signal; a column that is
         # all-NaN (e.g. a 200-day EMA on 60 days of data) is dropped.
         usable = [
             c for c in columns if c in featured.columns and featured[c].notna().any()
         ]
-        featured = featured[["symbol", "date", "target", *usable]]
+        featured = featured[["symbol", "date", "label_start", "label_end", "target", *usable]]
         frames.append(featured)
 
     if not frames:
         return pd.DataFrame()
 
     full = pd.concat(frames, ignore_index=True)
-    feature_cols = [c for c in full.columns if c not in {"symbol", "date", "target"}]
-    full = full.dropna(subset=["target", *feature_cols])
+    feature_cols = [
+        c for c in full.columns if c not in {"symbol", "date", "label_start", "label_end", "target"}
+    ]
+    full = full.dropna(subset=["target", "label_start", "label_end", *feature_cols])
     return full.sort_values(["date", "symbol"]).reset_index(drop=True)
+
 
 
 def _default_lgbm_params() -> dict:

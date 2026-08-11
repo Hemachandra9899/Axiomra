@@ -7,7 +7,7 @@ A REDUCE on a zero position is a no-op; a LONG already at target is a no-op.
 from __future__ import annotations
 
 from axiomra.domain.orders import OrderSide
-from axiomra.portfolio.planner import plan_order, plan_reduce
+from axiomra.portfolio.planner import plan_order, plan_reduce, resolve_order_side
 
 
 def test_long_with_positive_delta_buys():
@@ -108,3 +108,12 @@ def test_plan_reduce_exits_position():
     assert order.side == OrderSide.SELL
     assert order.quantity == 50
     assert plan_reduce("ABC", current_quantity=0) is None
+
+
+def test_resolve_order_side():
+    assert resolve_order_side("LONG", current_quantity=0) == OrderSide.BUY
+    assert resolve_order_side("LONG", current_quantity=50) == OrderSide.BUY
+    assert resolve_order_side("REDUCE", current_quantity=50) == OrderSide.SELL
+    assert resolve_order_side("REDUCE", current_quantity=0) is None
+    assert resolve_order_side("NO_TRADE", current_quantity=50) is None
+

@@ -7,12 +7,12 @@ the reported IC is a true out-of-sample statistic.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axiomra.data.snapshot import DatasetSnapshot
 from axiomra.quant.trainer import build_training_frame
@@ -62,6 +62,8 @@ class FoldReport(BaseModel):
     n_test: int
     ic: float
     rank_ic: float
+    ic_ir: float = 0.0
+    pct_positive_ic: float = 0.0
     hit_rate: float
     top_quintile_return: float
     n_traded: int = 0
@@ -70,9 +72,11 @@ class FoldReport(BaseModel):
 class WalkForwardReport(BaseModel):
     """Aggregate over all folds."""
 
-    folds: list[FoldReport] = field(default_factory=list)  # type: ignore[assignment]
+    folds: list[FoldReport] = Field(default_factory=list)
     mean_ic: float = 0.0
     mean_rank_ic: float = 0.0
+    mean_ic_ir: float = 0.0
+    mean_pct_positive_ic: float = 0.0
     mean_hit_rate: float = 0.0
     mean_top_quintile_return: float = 0.0
 
@@ -108,7 +112,14 @@ def evaluate_predictions(
     y_pred = np.asarray(y_pred, dtype=float)
     valid = ~np.isnan(y_true)
     if valid.sum() < 2:
-        return {"ic": 0.0, "rank_ic": 0.0, "hit_rate": 0.0, "top_quintile_return": 0.0}
+        return {
+            "ic": 0.0,
+            "rank_ic": 0.0,
+            "ic_ir": 0.0,
+            "pct_positive_ic": 0.0,
+            "hit_rate": 0.0,
+            "top_quintile_return": 0.0,
+        }
 
     y_true = y_true[valid]
     y_pred = y_pred[valid]
@@ -121,8 +132,61 @@ def evaluate_predictions(
     return {
         "ic": _pearson(y_true, y_pred),
         "rank_ic": _spearman(y_true, y_pred),
+        "ic_ir": 0.0,
+        "pct_positive_ic": 1.0 if _pearson(y_true, y_pred) > 0 else 0.0,
         "hit_rate": hit,
         "top_quintile_return": float(y_true[idx].mean()),
+    }
+
+
+def evaluate_daily_predictions(
+    test_frame: pd.DataFrame,
+    preds: np.ndarray,
+    top_fraction: float = 0.2,
+) -> dict[str, float]:
+    """Daily cross-sectional IC, Rank IC, IC IR, positive IC days %, and top-quintile return."""
+    df = test_frame[["date", "target"]].copy()
+    df["pred"] = preds
+    daily_ics: list[float] = []
+    daily_rank_ics: list[float] = []
+
+    for _, group in df.groupby("date"):
+        if len(group) >= 2:
+            y_t = group["target"].to_numpy(dtype=float)
+            y_p = group["pred"].to_numpy(dtype=float)
+            daily_ics.append(_pearson(y_t, y_p))
+            daily_rank_ics.append(_spearman(y_t, y_p))
+
+    mean_ic = float(np.mean(daily_ics)) if daily_ics else 0.0
+    std_ic = float(np.std(daily_ics)) if len(daily_ics) > 1 else 0.0
+    ic_ir = mean_ic / std_ic if std_ic > 0 else 0.0
+    pct_positive = float(np.mean(np.array(daily_ics) > 0)) if daily_ics else 0.0
+
+    y_true = df["target"].to_numpy(dtype=float)
+    y_pred = df["pred"].to_numpy(dtype=float)
+    valid = ~np.isnan(y_true)
+    if valid.sum() < 2:
+        return {
+            "ic": mean_ic,
+            "rank_ic": float(np.mean(daily_rank_ics)) if daily_rank_ics else 0.0,
+            "ic_ir": ic_ir,
+            "pct_positive_ic": pct_positive,
+            "hit_rate": 0.0,
+            "top_quintile_return": 0.0,
+        }
+
+    k = max(1, int(round(len(y_pred) * top_fraction)))
+    idx = np.argsort(y_pred)[::-1][:k]
+    top_ret = float(y_true[idx].mean()) if len(y_true) else 0.0
+    hit_rate = float(np.mean((y_true * np.sign(y_pred)) > 0)) if len(y_true) else 0.0
+
+    return {
+        "ic": mean_ic,
+        "rank_ic": float(np.mean(daily_rank_ics)) if daily_rank_ics else 0.0,
+        "ic_ir": ic_ir,
+        "pct_positive_ic": pct_positive,
+        "hit_rate": hit_rate,
+        "top_quintile_return": top_ret,
     }
 
 
@@ -162,25 +226,34 @@ def run_walk_forward(
     feature_cols = [
         c
         for c in frame.columns
-        if c not in {"symbol", "date", "target"}
+        if c not in {"symbol", "date", "label_start", "label_end", "target"}
     ]
 
     fold_reports: list[FoldReport] = []
     for i, (train_dates, test_dates) in enumerate(folds, start=1):
-        train = frame[frame["date"].isin(train_dates)]
+        test_start = min(test_dates)
+        # Purge training samples whose label ends at or after test_start to prevent target leakage
+        if "label_end" in frame.columns:
+            train = frame[
+                frame["date"].isin(train_dates) & (frame["label_end"] < test_start)
+            ]
+        else:
+            train = frame[frame["date"].isin(train_dates)]
         test = frame[frame["date"].isin(test_dates)]
+
+        if not train.empty and "label_end" in train.columns:
+            assert train["label_end"].max() < test_start
 
         x_tr = train[feature_cols].to_numpy(dtype=float)
         y_tr = train["target"].to_numpy(dtype=float)
         x_te = test[feature_cols].to_numpy(dtype=float)
-        y_te = test["target"].to_numpy(dtype=float)
 
         if len(x_tr) < 20 or len(x_te) < 2:
             continue
 
         model = estimator_factory(x_tr, y_tr)  # type: ignore[operator]
         preds = np.asarray(model.predict(x_te), dtype=float)
-        metrics = evaluate_predictions(y_te, preds)
+        metrics = evaluate_daily_predictions(test, preds)
 
         fold_reports.append(
             FoldReport(
@@ -202,8 +275,11 @@ def run_walk_forward(
         folds=fold_reports,
         mean_ic=float(np.mean([f.ic for f in fold_reports])),
         mean_rank_ic=float(np.mean([f.rank_ic for f in fold_reports])),
+        mean_ic_ir=float(np.mean([f.ic_ir for f in fold_reports])),
+        mean_pct_positive_ic=float(np.mean([f.pct_positive_ic for f in fold_reports])),
         mean_hit_rate=float(np.mean([f.hit_rate for f in fold_reports])),
         mean_top_quintile_return=float(
             np.mean([f.top_quintile_return for f in fold_reports])
         ),
     )
+

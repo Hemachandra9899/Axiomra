@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import sqrt
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axiomra.domain.signals import EvidenceSignal, Regime
 
@@ -67,7 +67,7 @@ class FusionResult(BaseModel):
     confidence: float
     effective_score: float
     disagreement: float
-    sources: list[FusionSource] = []
+    sources: list[FusionSource] = Field(default_factory=list)
 
 
 @dataclass
