@@ -91,11 +91,19 @@ class NIFTYMembershipProvider:
             # Strict canonical instrument_id resolution & validation
             instrument_id = str(item.get("instrument_id", "")).strip()
             if instrument_id:
-                if instruments is not None and instruments.get(instrument_id) is None:
-                    raise ValueError(
-                        f"Supplied instrument_id '{instrument_id}' for index constituent '{symbol_ns}' "
-                        f"as of {from_dt.isoformat()} does not exist in InstrumentMaster."
-                    )
+                if instruments is not None:
+                    resolved_inst = instruments.resolve_symbol(symbol_ns, from_dt)
+                    if resolved_inst is not None and resolved_inst.instrument_id != instrument_id:
+                        raise ValueError(
+                            f"Membership identity mismatch: supplied instrument_id '{instrument_id}' "
+                            f"for symbol '{symbol_ns}' as of {from_dt.isoformat()} does not match "
+                            f"resolved instrument_id '{resolved_inst.instrument_id}'."
+                        )
+                    if instruments.get(instrument_id) is None:
+                        raise ValueError(
+                            f"Supplied instrument_id '{instrument_id}' for index constituent '{symbol_ns}' "
+                            f"as of {from_dt.isoformat()} does not exist in InstrumentMaster."
+                        )
             else:
                 if instruments is not None:
                     resolved = instruments.resolve_symbol(symbol_ns, from_dt)

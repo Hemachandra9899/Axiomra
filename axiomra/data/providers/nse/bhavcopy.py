@@ -59,7 +59,7 @@ class NSEBhavcopyProvider:
             if universe_symbols and symbol_ns not in universe_symbols and raw_symbol not in universe_symbols:
                 continue
 
-            date_str = (row.get("TIMESTAMP") or row.get("TRDG_DT") or row.get("Date") or trade_date).strip()
+            date_str = (row.get("TIMESTAMP") or row.get("TRDG_DT") or row.get("Date") or row.get("TradDt") or trade_date).strip()
             try:
                 if "-" in date_str and len(date_str) == 10:
                     dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -80,10 +80,10 @@ class NSEBhavcopyProvider:
                             pass
                 return 0.0
 
-            open_p = _flt(["OPEN_PRICE", "OPEN", "OpnPrc"])
-            high_p = _flt(["HIGH_PRICE", "HIGH", "HghPrc"])
-            low_p = _flt(["LOW_PRICE", "LOW", "LwPrc"])
-            close_p = _flt(["CLOSE_PRICE", "CLOSE", "ClsPrc"])
+            open_p = _flt(["OPEN_PRICE", "OPEN", "OpnPrc", "OpnPric"])
+            high_p = _flt(["HIGH_PRICE", "HIGH", "HghPrc", "HghPric"])
+            low_p = _flt(["LOW_PRICE", "LOW", "LwPrc", "LwPric"])
+            close_p = _flt(["CLOSE_PRICE", "CLOSE", "ClsPrc", "ClsPric"])
             vol = _flt(["TTL_TRD_QTY", "TOTTRDQTY", "TtlTradgVol", "VOLUME"])
 
             bar = Bar(

@@ -122,3 +122,49 @@ def test_coverage_analyzer_flags_data_gap_when_below_threshold():
     assert item.status == "DATA_GAP"
     assert "Coverage ratio" in item.notes[0]
     assert report.ready_for_dataset is False
+
+
+def test_coverage_respects_half_open_membership_boundary():
+    """CoverageAnalyzer must strictly enforce half-open membership boundary [from_date, until_date)."""
+    from_dt = datetime(2024, 1, 1, tzinfo=UTC)
+    until_dt = datetime(2024, 1, 10, tzinfo=UTC)  # Jan 10 is until_date (exclusive)
+
+    master = InstrumentMaster()
+    master.upsert(
+        Instrument(
+            instrument_id="INST-BOUND",
+            symbol="BOUND.NS",
+            active_from=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    memberships = [
+        IndexMembership(
+            instrument_id="INST-BOUND",
+            symbol="BOUND.NS",
+            index_name="NIFTY 200",
+            from_date=from_dt,
+            until_date=until_dt,
+        )
+    ]
+
+    # Bar on until_dt (Jan 10) must be excluded from active interval bars
+    bars = [
+        Bar(symbol="BOUND.NS", timestamp=from_dt + timedelta(days=i), open=100.0, high=101.0, low=99.0, close=100.5, volume=1000.0)
+        for i in range(15)  # Spans Jan 1 to Jan 15
+    ]
+    uni = Universe(name="NIFTY 200", version="v1", as_of=datetime.now(UTC), members=["BOUND.NS"])
+    snap = create_snapshot(universe=uni, bars={"BOUND.NS": bars}, data_version="d1")
+
+    analyzer = CoverageAnalyzer(min_coverage_ratio=0.98)
+    report = analyzer.analyze_coverage(
+        memberships=memberships,
+        snapshot=snap,
+        instruments=master,
+        index_name="NIFTY 200",
+    )
+
+    item = report.items[0]
+    # Jan 10 bar must NOT be counted in actual_sessions for half-open interval [Jan 1, Jan 10)
+    assert item.last_required_date == until_dt
+    assert item.actual_sessions == len({b.timestamp.date() for b in bars if from_dt <= b.timestamp < until_dt})

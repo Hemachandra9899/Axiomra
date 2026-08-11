@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from axiomra.data.calendar import NSETradingCalendar
 from axiomra.data.instruments import InstrumentMaster
 from axiomra.data.snapshot import DatasetSnapshot
 from axiomra.data.universe import IndexMembership
@@ -102,6 +103,8 @@ class CoverageAnalyzer:
                 target_id = resolved_inst.instrument_id if resolved_inst is not None else sym
                 id_to_bars.setdefault(target_id, []).append(b)
 
+        calendar = NSETradingCalendar()
+
         for m in target_memberships:
             is_active = m.until_date is None or m.until_date > now_utc
             if is_active:
@@ -116,23 +119,21 @@ class CoverageAnalyzer:
             else:
                 unresolved_cnt += 1
 
-            # Required interval bounds
+            # Required half-open interval bounds: [from_date, until_date)
             req_start = max(m.from_date, start_date)
             req_end = min(m.until_date, end_date) if m.until_date else end_date
+            include_end = (m.until_date is None or m.until_date > end_date)
 
-            # Calculate expected weekday trading sessions
-            expected_sessions = 0
-            curr = req_start
-            while curr <= req_end:
-                if curr.weekday() < 5:
-                    expected_sessions += 1
-                curr += timedelta(days=1)
+            # Calculate expected trading sessions using official NSE trading calendar
+            expected_sessions_list = calendar.trading_sessions_between(req_start, req_end, include_end=include_end)
+            expected_sessions = len(expected_sessions_list)
 
-            # instrument_id-first bar lookup across all historical aliases
+            # instrument_id-first bar lookup across all historical aliases (half-open [req_start, req_end))
             all_inst_bars = sorted(id_to_bars.get(m.instrument_id, []), key=lambda b: b.timestamp)
-            interval_bars = [
-                b for b in all_inst_bars if req_start <= b.timestamp <= req_end
-            ]
+            if include_end:
+                interval_bars = [b for b in all_inst_bars if req_start <= b.timestamp <= req_end]
+            else:
+                interval_bars = [b for b in all_inst_bars if req_start <= b.timestamp < req_end]
 
             actual_sessions = len({b.timestamp.date() for b in interval_bars})
             missing_sessions = max(0, expected_sessions - actual_sessions)

@@ -1,6 +1,6 @@
 """Live Network Integration Test — Upstox API Providers.
 
-Requires active internet access and optional `UPSTOX_ACCESS_TOKEN`.
+Requires active internet access and `UPSTOX_ACCESS_TOKEN`.
 Execute explicitly via: `pytest -m live`
 """
 
@@ -42,7 +42,7 @@ def test_upstox_live_reliance_candle_fetch(tmp_path: Path):
     """
     token = os.environ.get("UPSTOX_ACCESS_TOKEN")
     if not token:
-        pytest.skip("UPSTOX_ACCESS_TOKEN not set — skipping live V3 candle API test")
+        pytest.skip("UPSTOX_ACCESS_TOKEN not set — skipping V3 authenticated candle API test")
 
     raw_store = RawStore(root_dir=tmp_path / "live_raw")
     client = UpstoxClient(access_token=token)

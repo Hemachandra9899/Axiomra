@@ -20,10 +20,7 @@ def test_nifty_live_constituents_download(tmp_path: Path):
     raw_store = RawStore(root_dir=tmp_path / "live_raw")
     loader = NSEIndicesSourceLoader(raw_store=raw_store)
 
-    try:
-        csv_bytes, manifest = loader.fetch_index_constituents_bytes(index_name="NIFTY 200")
-    except Exception as exc:
-        pytest.skip(f"NIFTY Indices constituent endpoint unavailable: {exc}")
+    csv_bytes, manifest = loader.fetch_index_constituents_bytes(index_name="NIFTY 200")
 
     assert manifest.provider == "nifty_indices"
     assert manifest.sha256 is not None

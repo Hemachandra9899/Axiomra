@@ -55,12 +55,55 @@ def test_nifty_membership_provider_provenance(tmp_path: Path):
 
 def test_nifty_membership_provider_strict_missing_from_date_raises(tmp_path: Path):
     """Missing 'from_date' in membership record must raise ValueError."""
+    import pytest
+
     mock_bad = [{"symbol": "RELIANCE.NS", "instrument_id": "inst-1"}]
     provider = NIFTYMembershipProvider(raw_store=RawStore(root_dir=tmp_path / "raw"))
 
-    import pytest
-    with pytest.raises(ValueError, match="from_date"):
+    with pytest.raises(ValueError, match="Manufacturing arbitrary historical start dates is prohibited"):
         provider.parse_membership_source_bytes(json.dumps(mock_bad).encode("utf-8"))
+
+
+def test_nifty_membership_provider_mismatched_identity_raises(tmp_path: Path):
+    """Supplied instrument_id mismatching resolved symbol ID at from_date must raise ValueError."""
+    from datetime import UTC, datetime
+
+    import pytest
+
+    from axiomra.data.instruments import Instrument, InstrumentMaster
+
+    master = InstrumentMaster()
+    master.upsert(
+        Instrument(
+            instrument_id="INST-RELIANCE-REAL",
+            symbol="RELIANCE.NS",
+            active_from=datetime(2017, 1, 1, tzinfo=UTC),
+        )
+    )
+    master.upsert(
+        Instrument(
+            instrument_id="INST-TCS-REAL",
+            symbol="TCS.NS",
+            active_from=datetime(2017, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    # Mismatched pair: RELIANCE.NS paired with TCS ID
+    mismatched_input = [
+        {
+            "instrument_id": "INST-TCS-REAL",
+            "symbol": "RELIANCE.NS",
+            "from_date": "2017-01-01T00:00:00+00:00",
+            "until_date": None,
+        }
+    ]
+
+    provider = NIFTYMembershipProvider(raw_store=RawStore(root_dir=tmp_path / "raw"))
+    with pytest.raises(ValueError, match="Membership identity mismatch"):
+        provider.parse_membership_source_bytes(
+            json.dumps(mismatched_input).encode("utf-8"),
+            instruments=master,
+        )
 
 
 def test_nifty_membership_provider_unresolvable_instrument_id_raises(tmp_path: Path):
