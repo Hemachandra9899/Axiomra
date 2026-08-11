@@ -33,6 +33,10 @@ class DatasetManifest(BaseModel):
     adjustment_mode: AdjustmentMode
     universe_name: str
     universe_version: str
+    universe_as_of: datetime
+    """Exact UTC timestamp of the original Universe.as_of — required for checksum identity."""
+    universe_members: list[str] = Field(default_factory=list)
+    """Ordered member list from the original Universe — required for checksum identity."""
     start_date: date
     end_date: date
     instrument_count: int

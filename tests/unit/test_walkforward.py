@@ -213,3 +213,44 @@ def test_top_quintile_is_selected_per_day():
     metrics = evaluate_daily_predictions(test_frame, preds, top_fraction=0.25)
     assert metrics["top_quintile_return"] == pytest.approx(0.07)
 
+
+def test_oos_predictions_are_fully_out_of_sample():
+    """Every OOS prediction row must fall within its fold's test date range.
+
+    This proves that no training-period predictions are included in the OOS
+    artifact, which would constitute target leakage.
+    """
+    from axiomra.backtest.walkforward import oos_predictions_df  # noqa: PLC0415
+
+    snap = _synthetic_snapshot(symbols=["A.NS", "B.NS", "C.NS"], days=400)
+
+    def dummy_factory(x, y):
+        class _M:
+            def predict(self, xp):
+                return [0.05] * len(xp)
+        return _M()
+
+    report = run_walk_forward(
+        snapshot=snap,
+        horizon=5,
+        n_splits=3,
+        min_train_days=30,
+        estimator_factory=dummy_factory,
+    )
+
+    assert len(report.oos_predictions) > 0, "oos_predictions must not be empty"
+    df = oos_predictions_df(report)
+    assert set(df.columns) >= {"date", "symbol", "score", "target", "fold"}
+
+    # Every row's date must fall in its fold's [test_start, test_end] interval
+    for _, row in df.iterrows():
+        fold = report.folds[int(row["fold"]) - 1]
+        row_date = pd.Timestamp(row["date"])
+        test_start = pd.Timestamp(fold.test_start)
+        test_end = pd.Timestamp(fold.test_end)
+        assert test_start <= row_date <= test_end, (
+            f"OOS prediction on {row_date} falls outside fold {fold.fold} "
+            f"test range [{test_start}, {test_end}]"
+        )
+
+

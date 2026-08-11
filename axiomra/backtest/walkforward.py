@@ -81,10 +81,23 @@ class WalkForwardReport(BaseModel):
     mean_pct_positive_ic: float = 0.0
     mean_hit_rate: float = 0.0
     mean_top_quintile_return: float = 0.0
+    oos_predictions: list[dict] = Field(default_factory=list)
+    """Per-row OOS predictions: date, symbol, score, target, fold."""
 
     @property
     def n_folds(self) -> int:
         return len(self.folds)
+
+
+def oos_predictions_df(report: WalkForwardReport) -> pd.DataFrame:
+    """Extract OOS predictions as a ready-to-backtest DataFrame.
+
+    Returns a DataFrame with columns: date, symbol, score, target, fold.
+    All rows are guaranteed to be out-of-sample (from test folds only).
+    """
+    if not report.oos_predictions:
+        return pd.DataFrame(columns=["date", "symbol", "score", "target", "fold"])
+    return pd.DataFrame(report.oos_predictions)
 
 
 def _pearson(a: np.ndarray, b: np.ndarray) -> float:
@@ -232,6 +245,7 @@ def run_walk_forward(
     ]
 
     fold_reports: list[FoldReport] = []
+    oos_rows: list[dict] = []
     for i, (train_dates, test_dates) in enumerate(folds, start=1):
         test_start = min(test_dates)
         # Purge training samples whose label ends at or after test_start to prevent target leakage
@@ -262,6 +276,16 @@ def run_walk_forward(
         preds = np.asarray(model.predict(x_te), dtype=float)
         metrics = evaluate_daily_predictions(test, preds)
 
+        # Collect OOS prediction rows (test fold only, guaranteed OOS)
+        for row_idx, (_, row) in enumerate(test.iterrows()):
+            oos_rows.append({
+                "date": row["date"],
+                "symbol": row["symbol"],
+                "score": float(preds[row_idx]),
+                "target": float(row["target"]),
+                "fold": i,
+            })
+
         fold_reports.append(
             FoldReport(
                 fold=i,
@@ -288,5 +312,6 @@ def run_walk_forward(
         mean_top_quintile_return=float(
             np.mean([f.top_quintile_return for f in fold_reports])
         ),
+        oos_predictions=oos_rows,
     )
 

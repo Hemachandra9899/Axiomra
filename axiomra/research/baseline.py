@@ -5,6 +5,8 @@ A ``BaselineReport`` binds a specific dataset (via ``dataset_id`` +
 and portfolio backtest metrics into a single immutable JSON artifact.
 
 Use ``compare()`` to detect regressions between two baseline runs.
+Regression rules use **both** absolute and relative thresholds to avoid
+false alarms on near-zero metrics (e.g. IC = 0.001 → 0.0008).
 
 Storage layout (via ArtifactStore)::
 
@@ -30,13 +32,66 @@ def _get_git_commit() -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=3,
+            capture_output=True, text=True, timeout=3,
         )
         return result.stdout.strip() if result.returncode == 0 else None
     except Exception:
         return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression rules
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class RegressionRule(BaseModel):
+    """Per-metric regression detection rule with dual absolute + relative thresholds.
+
+    A metric is flagged as regressed only when the degradation exceeds
+    **both** ``abs_tol`` AND (if set) ``rel_tol``.  This prevents noise-level
+    IC values (e.g. 0.001 → 0.0008) from triggering false CI alarms.
+
+    For Sharpe and MDD, only ``abs_tol`` applies (``rel_tol=None``).
+    """
+
+    metric: str
+    abs_tol: float
+    """Minimum absolute degradation required to flag as regression."""
+    rel_tol: float | None = None
+    """Minimum relative degradation (fraction) required to flag.  None = disabled."""
+    higher_is_better: bool = True
+
+    def is_regression(self, baseline_value: float, candidate_value: float) -> bool:
+        delta = candidate_value - baseline_value
+        if self.higher_is_better:
+            degradation = -delta  # negative = improvement; positive = regression
+        else:
+            degradation = delta  # lower is better → increase = regression
+
+        abs_breach = degradation >= self.abs_tol
+        if self.rel_tol is not None and baseline_value != 0:
+            rel_breach = (degradation / abs(baseline_value)) >= self.rel_tol
+        else:
+            rel_breach = True  # no relative rule — abs_tol alone decides
+
+        return abs_breach and rel_breach
+
+
+# Default rules applied when compare() is called without explicit rules
+_DEFAULT_RULES: list[RegressionRule] = [
+    RegressionRule(metric="mean_ic",           abs_tol=0.003, rel_tol=0.10, higher_is_better=True),
+    RegressionRule(metric="mean_rank_ic",      abs_tol=0.003, rel_tol=0.10, higher_is_better=True),
+    RegressionRule(metric="mean_ic_ir",        abs_tol=0.05,  rel_tol=0.10, higher_is_better=True),
+    RegressionRule(metric="sharpe",            abs_tol=0.10,  rel_tol=None, higher_is_better=True),
+    RegressionRule(metric="annualized_return", abs_tol=0.005, rel_tol=0.10, higher_is_better=True),
+    RegressionRule(metric="max_drawdown",      abs_tol=0.02,  rel_tol=None, higher_is_better=False),
+    RegressionRule(metric="avg_turnover",      abs_tol=0.05,  rel_tol=0.10, higher_is_better=False),
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Output models
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class RegressionDelta(BaseModel):
@@ -47,7 +102,7 @@ class RegressionDelta(BaseModel):
     candidate_value: float
     pct_change: float
     regressed: bool
-    """True if the change is a meaningful degradation (>= 5% relative drop)."""
+    """True if the change is a meaningful degradation per the RegressionRule."""
 
 
 class CompareResult(BaseModel):
@@ -74,61 +129,54 @@ class BaselineReport(BaseModel):
     created_at: datetime
     git_commit: str | None = None
 
-    # ── Key summary metrics (extracted for fast compare without unpacking) ──
+    # ── Key summary metrics (extracted from portfolio.* for fast compare) ───
     mean_ic: float = 0.0
     mean_rank_ic: float = 0.0
     mean_ic_ir: float = 0.0
     sharpe: float = 0.0
+    """Portfolio Sharpe ratio (from portfolio equity curve, not excess-return curve)."""
     max_drawdown: float = 0.0
+    """Portfolio max drawdown (from portfolio equity curve)."""
     annualized_return: float = 0.0
+    """Portfolio CAGR."""
     avg_turnover: float = 0.0
 
-    def compare(self, candidate: BaselineReport) -> CompareResult:
-        """Compare *self* (baseline) against *candidate*.
+    def compare(
+        self,
+        candidate: BaselineReport,
+        rules: list[RegressionRule] | None = None,
+    ) -> CompareResult:
+        """Compare *self* (baseline) against *candidate* using per-metric rules.
 
-        Returns ``CompareResult`` with per-metric deltas.  A metric is
-        flagged as regressed when the candidate's value is more than 5%
-        relatively worse than the baseline.
+        Parameters
+        ----------
+        candidate:
+            The newer run to evaluate.
+        rules:
+            Custom ``RegressionRule`` list.  Defaults to ``_DEFAULT_RULES``.
 
-        For IC / Sharpe / return, *higher is better*.
-        For max_drawdown, *less negative is better* (|MDD| should decrease).
-        For avg_turnover, *lower is better*.
+        Returns
+        -------
+        CompareResult with per-metric deltas and ``any_regression`` flag.
         """
-        _HIGHER_IS_BETTER = ["mean_ic", "mean_rank_ic", "mean_ic_ir", "sharpe", "annualized_return"]
-        _LOWER_IS_BETTER = ["avg_turnover"]
-        _LESS_NEGATIVE_IS_BETTER = ["max_drawdown"]
+        active_rules = rules if rules is not None else _DEFAULT_RULES
 
         def _pct(b: float, c: float) -> float:
-            if b == 0:
-                return 0.0
-            return (c - b) / abs(b)
-
-        THRESHOLD = 0.05  # 5% relative degradation threshold
+            return (c - b) / abs(b) if b != 0 else 0.0
 
         deltas: list[RegressionDelta] = []
-
-        for metric in _HIGHER_IS_BETTER:
-            bv = getattr(self, metric)
-            cv = getattr(candidate, metric)
+        for rule in active_rules:
+            bv = getattr(self, rule.metric)
+            cv = getattr(candidate, rule.metric)
             pct = _pct(bv, cv)
-            regressed = pct < -THRESHOLD
-            deltas.append(RegressionDelta(metric=metric, baseline_value=bv, candidate_value=cv, pct_change=pct, regressed=regressed))
-
-        for metric in _LOWER_IS_BETTER:
-            bv = getattr(self, metric)
-            cv = getattr(candidate, metric)
-            pct = _pct(bv, cv)
-            # For lower-is-better: regressed when candidate is >5% higher
-            regressed = pct > THRESHOLD
-            deltas.append(RegressionDelta(metric=metric, baseline_value=bv, candidate_value=cv, pct_change=pct, regressed=regressed))
-
-        for metric in _LESS_NEGATIVE_IS_BETTER:
-            bv = getattr(self, metric)
-            cv = getattr(candidate, metric)
-            # max_drawdown is negative; regressed = drawdown got larger in magnitude
-            pct = _pct(abs(bv), abs(cv)) if bv != 0 else 0.0
-            regressed = cv < bv - THRESHOLD * abs(bv)
-            deltas.append(RegressionDelta(metric=metric, baseline_value=bv, candidate_value=cv, pct_change=pct, regressed=regressed))
+            regressed = rule.is_regression(bv, cv)
+            deltas.append(RegressionDelta(
+                metric=rule.metric,
+                baseline_value=bv,
+                candidate_value=cv,
+                pct_change=pct,
+                regressed=regressed,
+            ))
 
         return CompareResult(
             baseline_model_version=self.model_version,
@@ -140,6 +188,11 @@ class BaselineReport(BaseModel):
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Factory and persistence
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def create_baseline(
     model_version: str,
     dataset_id: str,
@@ -148,7 +201,11 @@ def create_baseline(
     backtest_report: BacktestReport,
     git_commit: str | None = None,
 ) -> BaselineReport:
-    """Construct a ``BaselineReport`` from component reports."""
+    """Construct a ``BaselineReport`` from component reports.
+
+    Summary scalars are extracted from ``portfolio.*`` (not the excess-return
+    curve) so they reflect actual portfolio performance.
+    """
     if git_commit is None:
         git_commit = _get_git_commit()
 
@@ -160,13 +217,13 @@ def create_baseline(
         backtest_report=backtest_report,
         created_at=datetime.now(UTC),
         git_commit=git_commit,
-        # Summary mirrors
+        # Summary mirrors from portfolio curve + walk-forward report
         mean_ic=walk_forward_report.mean_ic,
         mean_rank_ic=walk_forward_report.mean_rank_ic,
         mean_ic_ir=walk_forward_report.mean_ic_ir,
-        sharpe=backtest_report.sharpe,
-        max_drawdown=backtest_report.max_drawdown,
-        annualized_return=backtest_report.annualized_return,
+        sharpe=backtest_report.portfolio.sharpe,
+        max_drawdown=backtest_report.portfolio.max_drawdown,
+        annualized_return=backtest_report.portfolio.cagr,
         avg_turnover=backtest_report.avg_turnover,
     )
 

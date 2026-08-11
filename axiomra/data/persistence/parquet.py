@@ -221,6 +221,8 @@ class ParquetDatasetRepository(DatasetRepository):
             adjustment_mode=snapshot.adjustment_mode,
             universe_name=snapshot.universe.name,
             universe_version=snapshot.universe.version,
+            universe_as_of=snapshot.universe.as_of,
+            universe_members=list(snapshot.universe.members),
             start_date=start_date,
             end_date=end_date,
             instrument_count=snapshot.symbol_count(),
@@ -322,13 +324,12 @@ class ParquetDatasetRepository(DatasetRepository):
                 )
             bars_by_symbol[str(symbol)] = bar_list
 
-        # Universe
-        uni_members = list(bars_by_symbol.keys())
+        # Universe — restore from manifest to preserve exact logical identity
         universe = Universe(
             name=manifest.universe_name,
             version=manifest.universe_version,
-            as_of=datetime.now(UTC),
-            members=uni_members,
+            as_of=manifest.universe_as_of,
+            members=manifest.universe_members if manifest.universe_members else list(bars_by_symbol.keys()),
         )
 
         snapshot = create_snapshot(

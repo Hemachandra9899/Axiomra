@@ -421,3 +421,37 @@ def test_dataset_can_reproduce_walkforward_after_roundtrip(tmp_path):
     assert before.mean_ic == pytest.approx(after.mean_ic)
     assert before.mean_hit_rate == pytest.approx(after.mean_hit_rate)
 
+
+def test_logical_checksum_survives_round_trip(tmp_path):
+    """The logical checksum of the restored snapshot must equal the manifest value.
+
+    This is the key identity invariant: if universe.as_of or universe.members
+    are not persisted and restored exactly, the restored snapshot will produce
+    a different checksum — making the dataset_id useless for reproducibility.
+    """
+    snap, master, repo = _sample_dataset(tmp_path)
+    manifest = repo.save(snap, master)
+    restored = repo.load(manifest.dataset_id)
+
+    assert restored.snapshot.checksum == manifest.logical_checksum, (
+        "Restored snapshot checksum does not match the persisted manifest.logical_checksum. "
+        "This means universe.as_of or universe.members were not restored exactly."
+    )
+    assert restored.snapshot.dataset_id == manifest.dataset_id
+
+
+def test_universe_as_of_survives_round_trip(tmp_path):
+    """universe.as_of must be restored exactly (not replaced with datetime.now())."""
+    snap, master, repo = _sample_dataset(tmp_path)
+    original_as_of = snap.universe.as_of
+
+    manifest = repo.save(snap, master)
+    restored = repo.load(manifest.dataset_id)
+
+    assert restored.snapshot.universe.as_of == original_as_of, (
+        f"Expected universe.as_of={original_as_of!r} "
+        f"but got {restored.snapshot.universe.as_of!r}"
+    )
+    assert restored.snapshot.universe.members == snap.universe.members
+
+
