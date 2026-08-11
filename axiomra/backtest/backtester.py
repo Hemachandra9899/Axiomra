@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from axiomra.data.snapshot import DatasetSnapshot
 
 if TYPE_CHECKING:
+    from axiomra.data.instruments import InstrumentMaster
     from axiomra.data.universe import IndexMembership
 
 _TRADING_DAYS = 252
@@ -163,8 +164,9 @@ def _get_git_commit() -> str | None:
 def _build_execution_return_matrix(
     snapshot: DatasetSnapshot,
     policy: ExecutionPolicy,
+    instruments: InstrumentMaster | None = None,
 ) -> pd.DataFrame:
-    """Build the per-symbol × per-date return matrix according to execution policy.
+    """Build the per-instrument × per-date return matrix according to execution policy.
 
     OPEN_NEXT (correct):
         date T → return = close[T+1] / open[T+1] − 1
@@ -183,14 +185,22 @@ def _build_execution_return_matrix(
                 fwd_ret = (b1.close - b1.open) / b1.open if b1.open != 0 else float("nan")
             else:  # CLOSE_NEXT — naive
                 fwd_ret = (b1.close - b0.close) / b0.close if b0.close != 0 else float("nan")
+
+            inst_id = symbol
+            if instruments is not None:
+                resolved = instruments.resolve_symbol(symbol, b0.timestamp)
+                if resolved is not None:
+                    inst_id = resolved.instrument_id
+
             rows.append({
                 "date": b0.timestamp.date(),
+                "instrument_id": inst_id,
                 "symbol": symbol,
                 "open_next": float(b1.open),
                 "fwd_return": fwd_ret,
             })
     if not rows:
-        return pd.DataFrame(columns=["date", "symbol", "open_next", "fwd_return"])
+        return pd.DataFrame(columns=["date", "instrument_id", "symbol", "open_next", "fwd_return"])
     return pd.DataFrame(rows)
 
 
@@ -287,6 +297,7 @@ def run_backtest(
     predictions_df: pd.DataFrame,
     config: BacktestConfig | None = None,
     memberships: list[IndexMembership] | None = None,
+    instruments: InstrumentMaster | None = None,
     dataset_checksum: str = "",
     feature_version: str = "",
     model_version: str = "",
@@ -299,13 +310,15 @@ def run_backtest(
     snapshot:
         The DatasetSnapshot (provides OHLCV bars for return computation).
     predictions_df:
-        DataFrame with columns ``date``, ``symbol``, ``score``.
+        DataFrame with columns ``date``, ``symbol``, ``score`` (and optionally ``instrument_id``).
         Must contain only OOS predictions (e.g. from ``oos_predictions_df()``).
     config:
         Backtest configuration.  Defaults to ``BacktestConfig()``.
     memberships:
         Optional list of ``IndexMembership`` records.  When provided the
         benchmark is restricted to PIT-eligible members on each date.
+    instruments:
+        Optional ``InstrumentMaster`` for resolving symbol renames to canonical ``instrument_id``.
     dataset_checksum / feature_version / model_version / git_commit:
         Provenance fields written into the returned ``BacktestReport``.
     """
@@ -326,14 +339,19 @@ def run_backtest(
         pred_df["date"] = pd.to_datetime(pred_df["date"]).dt.date
 
     # Build execution-aligned return matrix
-    ret_matrix = _build_execution_return_matrix(snapshot, config.execution_policy)
+    ret_matrix = _build_execution_return_matrix(snapshot, config.execution_policy, instruments=instruments)
     if ret_matrix.empty:
         raise ValueError("snapshot contains no bars — cannot compute returns")
 
     if not isinstance(ret_matrix["date"].iloc[0], date):
         ret_matrix["date"] = pd.to_datetime(ret_matrix["date"]).dt.date
 
-    merged = pred_df.merge(ret_matrix, on=["date", "symbol"], how="inner")
+    # Prefer joining on (instrument_id, date) if present in predictions_df
+    join_cols = ["date", "instrument_id"] if "instrument_id" in pred_df.columns and "instrument_id" in ret_matrix.columns else ["date", "symbol"]
+
+    # Disambiguate duplicate symbol column if joining on instrument_id
+    suffixes = ("", "_ret") if join_cols == ["date", "instrument_id"] else ("_pred", "")
+    merged = pred_df.merge(ret_matrix, on=join_cols, how="inner", suffixes=suffixes)
     if merged.empty:
         raise ValueError(
             "No overlap between prediction dates/symbols and snapshot bars. "

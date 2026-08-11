@@ -82,7 +82,7 @@ class WalkForwardReport(BaseModel):
     mean_hit_rate: float = 0.0
     mean_top_quintile_return: float = 0.0
     oos_predictions: list[dict] = Field(default_factory=list)
-    """Per-row OOS predictions: date, symbol, score, target, fold."""
+    """Per-row OOS predictions: date, instrument_id, symbol, score, target, fold, model_version."""
 
     @property
     def n_folds(self) -> int:
@@ -92,11 +92,11 @@ class WalkForwardReport(BaseModel):
 def oos_predictions_df(report: WalkForwardReport) -> pd.DataFrame:
     """Extract OOS predictions as a ready-to-backtest DataFrame.
 
-    Returns a DataFrame with columns: date, symbol, score, target, fold.
+    Returns a DataFrame with columns: date, instrument_id, symbol, score, target, fold, model_version.
     All rows are guaranteed to be out-of-sample (from test folds only).
     """
     if not report.oos_predictions:
-        return pd.DataFrame(columns=["date", "symbol", "score", "target", "fold"])
+        return pd.DataFrame(columns=["date", "instrument_id", "symbol", "score", "target", "fold", "model_version"])
     return pd.DataFrame(report.oos_predictions)
 
 
@@ -241,7 +241,7 @@ def run_walk_forward(
     feature_cols = [
         c
         for c in frame.columns
-        if c not in {"symbol", "date", "label_start", "label_end", "target"}
+        if c not in {"instrument_id", "symbol", "date", "label_start", "label_end", "target"}
     ]
 
     fold_reports: list[FoldReport] = []
@@ -271,19 +271,21 @@ def run_walk_forward(
         if len(x_tr) < 20 or len(x_te) < 2:
             continue
 
-
         model = estimator_factory(x_tr, y_tr)  # type: ignore[operator]
         preds = np.asarray(model.predict(x_te), dtype=float)
         metrics = evaluate_daily_predictions(test, preds)
 
         # Collect OOS prediction rows (test fold only, guaranteed OOS)
         for row_idx, (_, row) in enumerate(test.iterrows()):
+            inst_id = str(row.get("instrument_id") or row["symbol"])
             oos_rows.append({
                 "date": row["date"],
+                "instrument_id": inst_id,
                 "symbol": row["symbol"],
                 "score": float(preds[row_idx]),
                 "target": float(row["target"]),
                 "fold": i,
+                "model_version": "lgbm-v2",
             })
 
         fold_reports.append(

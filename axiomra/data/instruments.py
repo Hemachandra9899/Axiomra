@@ -30,6 +30,10 @@ class CorporateActionType(StrEnum):
     SPLIT = "SPLIT"
     REVERSE_SPLIT = "REVERSE_SPLIT"
     DIVIDEND = "DIVIDEND"
+    BONUS = "BONUS"
+    CONSOLIDATION = "CONSOLIDATION"
+    RIGHTS = "RIGHTS"
+    DEMERGER = "DEMERGER"
     MERGER = "MERGER"
     DELISTING = "DELISTING"
     SYMBOL_CHANGE = "SYMBOL_CHANGE"
@@ -64,6 +68,8 @@ class CorporateAction(BaseModel):
     amount: float | None = None  # for dividends
     currency: str = "INR"
     note: str | None = None
+    raw_description: str | None = None
+    source: str | None = None
 
 
     @field_validator("ex_date")

@@ -102,26 +102,27 @@ def build_training_frame(
         featured["target"] = execution_aligned_return(featured["close"], featured["open"], horizon)
         featured["symbol"] = symbol
         featured = featured.reset_index()
+        inst_ids = []
+        for row_date in featured["date"]:
+            target_id = symbol
+            if instruments is not None:
+                inst = instruments.resolve_symbol(symbol, row_date)
+                if inst is not None:
+                    target_id = inst.instrument_id
+            inst_ids.append(target_id)
+        featured["instrument_id"] = inst_ids
 
         # Point-in-Time Survivorship Bias Filter: Drop rows where instrument_id or symbol was NOT an active index member
         if membership_registry is not None:
-            is_member_mask = []
-            for row_date in featured["date"]:
-                target_id = symbol
-                if instruments is not None:
-                    inst = instruments.resolve_symbol(symbol, row_date)
-                    if inst is not None:
-                        target_id = inst.instrument_id
-
-                is_member_mask.append(
-                    membership_registry.is_member(target_id, row_date)
-                    or membership_registry.is_member(symbol, row_date)
-                )
+            is_member_mask = [
+                membership_registry.is_member(iid, rdate)
+                or membership_registry.is_member(symbol, rdate)
+                for iid, rdate in zip(featured["instrument_id"], featured["date"])
+            ]
             featured = featured[is_member_mask]
 
         if featured.empty:
             continue
-
 
         dates = featured["date"]
         featured["label_start"] = dates.shift(-1)
@@ -132,7 +133,7 @@ def build_training_frame(
         usable = [
             c for c in columns if c in featured.columns and featured[c].notna().any()
         ]
-        featured = featured[["symbol", "date", "label_start", "label_end", "target", *usable]]
+        featured = featured[["instrument_id", "symbol", "date", "label_start", "label_end", "target", *usable]]
         frames.append(featured)
 
     if not frames:
@@ -140,7 +141,7 @@ def build_training_frame(
 
     full = pd.concat(frames, ignore_index=True)
     feature_cols = [
-        c for c in full.columns if c not in {"symbol", "date", "label_start", "label_end", "target"}
+        c for c in full.columns if c not in {"instrument_id", "symbol", "date", "label_start", "label_end", "target"}
     ]
     full = full.dropna(subset=["target", "label_start", "label_end", *feature_cols])
     return full.sort_values(["date", "symbol"]).reset_index(drop=True)
