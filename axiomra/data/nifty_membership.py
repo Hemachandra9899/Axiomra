@@ -88,9 +88,15 @@ class NIFTYMembershipProvider:
             if until_dt is not None and until_dt.tzinfo is None:
                 until_dt = until_dt.replace(tzinfo=UTC)
 
-            # Strict canonical instrument_id resolution
+            # Strict canonical instrument_id resolution & validation
             instrument_id = str(item.get("instrument_id", "")).strip()
-            if not instrument_id:
+            if instrument_id:
+                if instruments is not None and instruments.get(instrument_id) is None:
+                    raise ValueError(
+                        f"Supplied instrument_id '{instrument_id}' for index constituent '{symbol_ns}' "
+                        f"as of {from_dt.isoformat()} does not exist in InstrumentMaster."
+                    )
+            else:
                 if instruments is not None:
                     resolved = instruments.resolve_symbol(symbol_ns, from_dt)
                     if resolved is not None:

@@ -53,6 +53,10 @@ include = ["axiomra*", "apps*", "workers*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = [
+    "live: live network tests (requires network access and optional UPSTOX_ACCESS_TOKEN)",
+]
 
 [tool.ruff]
 line-length = 88

@@ -54,11 +54,13 @@ class RawStore:
         parser_version: str = "v1",
     ) -> RawFetchManifest:
         """Store raw unparsed bytes and generate SHA-256 `RawFetchManifest`."""
+        import uuid
         now_utc = datetime.now(UTC)
         sha = sha256_bytes(data)
-        timestamp_tag = now_utc.strftime("%Y%m%dT%H%M%SZ")
+        timestamp_tag = now_utc.strftime("%Y%m%dT%H%M%S%fZ")
+        fetch_id = uuid.uuid4().hex[:8]
         sha_prefix = sha[:8]
-        key = f"{provider}/{resource_type}/{timestamp_tag}/{sha_prefix}/{filename}"
+        key = f"{provider}/{resource_type}/{timestamp_tag}_{fetch_id}/{sha_prefix}/{filename}"
 
         manifest = RawFetchManifest(
             provider=provider,

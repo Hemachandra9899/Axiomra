@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -24,8 +25,14 @@ class ConstituentCoverageItem(BaseModel):
     has_master_record: bool = False
     has_ohlcv_bars: bool = False
     bar_count: int = 0
-    first_bar_date: datetime | None = None
-    last_bar_date: datetime | None = None
+    expected_sessions: int = 0
+    actual_sessions: int = 0
+    missing_sessions: int = 0
+    coverage_ratio: float = 0.0
+    first_required_date: datetime | None = None
+    last_required_date: datetime | None = None
+    first_actual_bar: datetime | None = None
+    last_actual_bar: datetime | None = None
     has_corporate_actions: bool = False
     action_count: int = 0
     status: str = "PASS"
@@ -57,6 +64,9 @@ class HistoricalInstrumentCoverageReport(BaseModel):
 class CoverageAnalyzer:
     """Audits dataset snapshots and membership records for full historical constituent coverage."""
 
+    def __init__(self, min_coverage_ratio: float = 0.98) -> None:
+        self.min_coverage_ratio = min_coverage_ratio
+
     def analyze_coverage(
         self,
         memberships: list[IndexMembership],
@@ -64,7 +74,7 @@ class CoverageAnalyzer:
         instruments: InstrumentMaster,
         index_name: str = "NIFTY 200",
     ) -> HistoricalInstrumentCoverageReport:
-        """Analyze PIT index constituents, mapping resolution, bar coverage, and delisting status."""
+        """Analyze PIT index constituents using instrument_id-first bar resolution and 98% session coverage gating."""
         items: list[ConstituentCoverageItem] = []
         now_utc = datetime.now(UTC)
 
@@ -84,6 +94,14 @@ class CoverageAnalyzer:
         full_cnt = 0
         incomplete_cnt = 0
 
+        # Build instrument_id -> list[Bar] lookup by resolving snapshot bar symbols
+        id_to_bars: dict[str, list[Any]] = {}
+        for sym, bars in snapshot.bars.items():
+            for b in bars:
+                resolved_inst = instruments.resolve_symbol(sym, b.timestamp)
+                target_id = resolved_inst.instrument_id if resolved_inst is not None else sym
+                id_to_bars.setdefault(target_id, []).append(b)
+
         for m in target_memberships:
             is_active = m.until_date is None or m.until_date > now_utc
             if is_active:
@@ -91,23 +109,41 @@ class CoverageAnalyzer:
             else:
                 delisted_cnt += 1
 
-            inst = instruments.resolve_symbol(m.symbol, m.from_date)
+            inst = instruments.get(m.instrument_id) or instruments.resolve_symbol(m.symbol, m.from_date)
             has_master = inst is not None
             if has_master:
                 resolved_cnt += 1
             else:
                 unresolved_cnt += 1
 
-            # Check bar coverage in snapshot
-            symbol_bars = snapshot.bars.get(m.symbol, [])
-            has_bars = len(symbol_bars) > 0
-            bar_cnt = len(symbol_bars)
-            first_b = symbol_bars[0].timestamp if symbol_bars else None
-            last_b = symbol_bars[-1].timestamp if symbol_bars else None
+            # Required interval bounds
+            req_start = max(m.from_date, start_date)
+            req_end = min(m.until_date, end_date) if m.until_date else end_date
 
-            # Check action coverage
+            # Calculate expected weekday trading sessions
+            expected_sessions = 0
+            curr = req_start
+            while curr <= req_end:
+                if curr.weekday() < 5:
+                    expected_sessions += 1
+                curr += timedelta(days=1)
+
+            # instrument_id-first bar lookup across all historical aliases
+            all_inst_bars = sorted(id_to_bars.get(m.instrument_id, []), key=lambda b: b.timestamp)
+            interval_bars = [
+                b for b in all_inst_bars if req_start <= b.timestamp <= req_end
+            ]
+
+            actual_sessions = len({b.timestamp.date() for b in interval_bars})
+            missing_sessions = max(0, expected_sessions - actual_sessions)
+            coverage_ratio = actual_sessions / expected_sessions if expected_sessions > 0 else 1.0
+
+            has_bars = len(all_inst_bars) > 0
+            first_b = all_inst_bars[0].timestamp if all_inst_bars else None
+            last_b = all_inst_bars[-1].timestamp if all_inst_bars else None
+
+            # Check corporate action coverage
             actions = [a for a in snapshot.actions if a.instrument_id == m.instrument_id]
-            has_actions = len(actions) > 0
 
             notes: list[str] = []
             status = "PASS"
@@ -118,6 +154,9 @@ class CoverageAnalyzer:
             elif not has_bars:
                 status = "MISSING_BARS"
                 notes.append("No OHLCV bars found in dataset snapshot")
+            elif coverage_ratio < self.min_coverage_ratio:
+                status = "DATA_GAP"
+                notes.append(f"Coverage ratio {coverage_ratio:.3f} < threshold {self.min_coverage_ratio}")
             elif not is_active:
                 status = "DELISTED_INCLUDED"
                 notes.append("Historical constituent removed/delisted from index")
@@ -137,10 +176,16 @@ class CoverageAnalyzer:
                 is_delisted_or_removed=not is_active,
                 has_master_record=has_master,
                 has_ohlcv_bars=has_bars,
-                bar_count=bar_cnt,
-                first_bar_date=first_b,
-                last_bar_date=last_b,
-                has_corporate_actions=has_actions,
+                bar_count=len(all_inst_bars),
+                expected_sessions=expected_sessions,
+                actual_sessions=actual_sessions,
+                missing_sessions=missing_sessions,
+                coverage_ratio=coverage_ratio,
+                first_required_date=req_start,
+                last_required_date=req_end,
+                first_actual_bar=first_b,
+                last_actual_bar=last_b,
+                has_corporate_actions=len(actions) > 0,
                 action_count=len(actions),
                 status=status,
                 notes=notes,

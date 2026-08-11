@@ -73,3 +73,42 @@ WIPRO,EQ,Demerger,20-Jan-2024
     # Split
     split = next(a for a in actions if a.action_type == CorporateActionType.SPLIT)
     assert split.ratio == 2.0  # 10 to 5 split ratio = 10/5 = 2.0
+
+
+def test_nse_client_zip_extraction(tmp_path: Path):
+    """NSEClient must extract raw CSV bytes when downloading ZIP Bhavcopy files."""
+    import io
+    import zipfile
+
+    from axiomra.data.providers.nse.client import NSEClient
+
+    csv_content = b"SYMBOL,SERIES,OPEN_PRICE,HIGH_PRICE,LOW_PRICE,CLOSE_PRICE,TTL_TRD_QTY,TIMESTAMP\nRELIANCE,EQ,2500,2550,2490,2540,1000,2024-01-02\n"
+
+    # Construct mock ZIP in-memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("BhavCopy_NSE_CM_0_0_0_20240102_F_0000.csv", csv_content)
+    mock_zip_bytes = zip_buffer.getvalue()
+
+    raw_store = RawStore(root_dir=tmp_path / "raw")
+    client = NSEClient(raw_store=raw_store)
+
+    extracted_csv, manifest = client.fetch_bhavcopy_bytes("20240102", mock_bytes=mock_zip_bytes)
+
+    assert extracted_csv == csv_content
+    assert manifest.raw_path.endswith(".zip")
+    assert manifest.sha256 is not None
+
+
+def test_nse_client_invalid_corporate_actions_raises(tmp_path: Path):
+    """NSEClient must raise ValueError when corporate action response lacks required CSV headers."""
+    import pytest
+
+    from axiomra.data.providers.nse.client import NSEClient
+
+    bad_html_response = b"<html><body>Error 403 Forbidden</body></html>"
+    raw_store = RawStore(root_dir=tmp_path / "raw")
+    client = NSEClient(raw_store=raw_store)
+
+    with pytest.raises(ValueError, match="required headers"):
+        client.fetch_corporate_actions_bytes(mock_bytes=bad_html_response)

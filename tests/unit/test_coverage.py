@@ -72,3 +72,53 @@ def test_coverage_analyzer_audit():
     assert item_bbb.is_delisted_or_removed is True
     assert item_bbb.has_master_record is False
     assert item_bbb.status == "UNRESOLVED_ID"
+
+
+def test_coverage_analyzer_flags_data_gap_when_below_threshold():
+    """CoverageAnalyzer must assign DATA_GAP status when coverage_ratio < min_coverage_ratio (0.98)."""
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = datetime(2024, 1, 31, tzinfo=UTC)  # 23 weekdays
+
+    master = InstrumentMaster()
+    master.upsert(
+        Instrument(
+            instrument_id="INST-GAP",
+            symbol="GAP.NS",
+            active_from=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    memberships = [
+        IndexMembership(
+            instrument_id="INST-GAP",
+            symbol="GAP.NS",
+            index_name="NIFTY 200",
+            from_date=start,
+            until_date=end,
+        )
+    ]
+
+    bars_gap = [
+        Bar(symbol="GAP.NS", timestamp=start + timedelta(days=i), open=100.0, high=101.0, low=99.0, close=100.5, volume=1000.0)
+        for i in range(5)
+    ]
+    bars_full = [
+        Bar(symbol="FULL.NS", timestamp=start + timedelta(days=i), open=100.0, high=101.0, low=99.0, close=100.5, volume=1000.0)
+        for i in range(31)
+    ]
+    uni = Universe(name="NIFTY 200", version="v1", as_of=datetime.now(UTC), members=["GAP.NS", "FULL.NS"])
+    snap = create_snapshot(universe=uni, bars={"GAP.NS": bars_gap, "FULL.NS": bars_full}, data_version="d1")
+
+    analyzer = CoverageAnalyzer(min_coverage_ratio=0.98)
+    report = analyzer.analyze_coverage(
+        memberships=memberships,
+        snapshot=snap,
+        instruments=master,
+        index_name="NIFTY 200",
+    )
+
+    item = report.items[0]
+    assert item.coverage_ratio < 0.98
+    assert item.status == "DATA_GAP"
+    assert "Coverage ratio" in item.notes[0]
+    assert report.ready_for_dataset is False
