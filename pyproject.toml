@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axiomra"
+version = "0.1.0"
+description = "Evidence-driven AI quant intelligence platform"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Axiomra" }]
+dependencies = [
+    "pydantic>=2.5",
+    "numpy>=1.26",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "lightgbm>=4.0",
+]
+data = [
+    "yfinance>=0.2",
+]
+tests = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+web = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+db = [
+    "asyncpg>=0.29",
+    "sqlalchemy[asyncio]>=2.0",
+]
+dev = [
+    "axiomra[ml,data,tests,web,db]",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["axiomra*", "apps*", "workers*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
